@@ -6,24 +6,23 @@ import { ProgressBar } from '../components/UI';
 import { potBg } from '../theme';
 
 export default function PotDetail({ route, navigation }) {
-  const { potKey } = route.params;
+  const { potId } = route.params;
   const { F, sym, pots, expenses } = useApp();
   const insets = useSafeAreaInsets();
 
-  const pot = pots.find(p => p.key === potKey);
+  const pot = pots.find(p => p.id === potId);
   if (!pot) return (
     <View style={{ flex: 1, backgroundColor: F.bg, alignItems: 'center', justifyContent: 'center' }}>
       <Text style={{ color: F.ink2 }}>Pot not found.</Text>
     </View>
   );
 
-  const potExpenses = expenses.filter(e => e.potKey === potKey);
-  const pct = pot.spend / pot.budget;
+  const potExpenses = expenses.filter(e => e.category_id === potId);
+  const pct = pot.budget > 0 ? pot.spend / pot.budget : 0;
   const over = pct > 1;
 
-  // Group by date label
   const grouped = potExpenses.reduce((acc, e) => {
-    const key = e.time?.split('·')[0]?.trim() || e.time || 'Unknown';
+    const key = e.expense_date || 'Unknown';
     if (!acc[key]) acc[key] = [];
     acc[key].push(e);
     return acc;
@@ -34,41 +33,50 @@ export default function PotDetail({ route, navigation }) {
       style={{ flex: 1, backgroundColor: F.bg }}
       contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
     >
-      {/* Hero card */}
       <View style={{
         backgroundColor: potBg(F, pot.color),
         margin: 16, borderRadius: 24, padding: 22,
       }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <Text style={{ fontSize: 32 }}>{pot.emoji}</Text>
-          <Text style={{ fontSize: 22, color: F.ink, fontWeight: '500' }}>{pot.label}</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between',
+          alignItems: 'flex-start', marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Text style={{ fontSize: 32 }}>{pot.emoji}</Text>
+            <Text style={{ fontSize: 22, color: F.ink, fontWeight: '500' }}>{pot.label}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('EditPot', { id: pot.id })}
+            style={{ backgroundColor: F.surface, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99 }}
+          >
+            <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>Edit</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={{ fontSize: 13, color: F.ink2 }}>Spent this month</Text>
         <Text style={{ fontSize: 48, color: F.ink, fontWeight: '400', lineHeight: 54, marginTop: 2 }}>
           {sym}{pot.spend.toFixed(2)}
         </Text>
-        <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>
-          of {sym}{pot.budget} budget
-          {over && (
-            <Text style={{ color: F.coral }}>  · over by {sym}{(pot.spend - pot.budget).toFixed(2)}</Text>
-          )}
-        </Text>
-
-        <ProgressBar value={pot.spend} max={pot.budget}
-          color={over ? F.coral : F.sageD} F={F} height={8}
-          style={{ marginTop: 14 }}
-        />
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-          <Text style={{ fontSize: 12, color: F.ink2 }}>{Math.round(pct * 100)}% used</Text>
-          <Text style={{ fontSize: 12, color: F.ink2 }}>
-            {sym}{Math.max(0, pot.budget - pot.spend).toFixed(2)} left
-          </Text>
-        </View>
+        {pot.budget > 0 ? (
+          <>
+            <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>
+              of {sym}{pot.budget} budget
+              {over && (
+                <Text style={{ color: F.coral }}>  · over by {sym}{(pot.spend - pot.budget).toFixed(2)}</Text>
+              )}
+            </Text>
+            <ProgressBar value={pot.spend} max={pot.budget}
+              color={over ? F.coral : F.sageD} F={F} height={8}/>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+              <Text style={{ fontSize: 12, color: F.ink2 }}>{Math.round(pct * 100)}% used</Text>
+              <Text style={{ fontSize: 12, color: F.ink2 }}>
+                {sym}{Math.max(0, pot.budget - pot.spend).toFixed(2)} left
+              </Text>
+            </View>
+          </>
+        ) : (
+          <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>no budget set</Text>
+        )}
       </View>
 
-      {/* Transaction list */}
       <View style={{ paddingHorizontal: 16 }}>
         <Text style={{ fontSize: 18, color: F.ink, marginBottom: 14 }}>
           Transactions{potExpenses.length > 0 ? ` (${potExpenses.length})` : ''}
@@ -86,7 +94,6 @@ export default function PotDetail({ route, navigation }) {
         ) : (
           Object.entries(grouped).map(([dateGroup, groupExpenses]) => (
             <View key={dateGroup} style={{ marginBottom: 20 }}>
-              {/* Date header */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: F.ink2 }}>{dateGroup}</Text>
                 <View style={{ flex: 1, height: 1, backgroundColor: F.line }}/>
@@ -94,8 +101,6 @@ export default function PotDetail({ route, navigation }) {
                   {sym}{groupExpenses.reduce((s, e) => s + e.amount, 0).toFixed(2)}
                 </Text>
               </View>
-
-              {/* Expenses for this date */}
               <View style={{ backgroundColor: F.surface, borderRadius: 20,
                 borderWidth: 1, borderColor: F.line, overflow: 'hidden' }}>
                 {groupExpenses.map((e, i) => (
@@ -109,24 +114,17 @@ export default function PotDetail({ route, navigation }) {
                       borderTopWidth: i > 0 ? 1 : 0, borderTopColor: F.line,
                     }}
                   >
-                    {/* Icon */}
                     <View style={{
                       width: 44, height: 44, borderRadius: 14,
                       backgroundColor: potBg(F, pot.color),
                       alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <Text style={{ fontSize: 20 }}>{e.icon}</Text>
+                      <Text style={{ fontSize: 20 }}>{pot.emoji}</Text>
                     </View>
-
-                    {/* Merchant + time */}
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '600', color: F.ink }}>{e.merchant}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        {/* Time — show the time part after · if present */}
-                        <Text style={{ fontSize: 12, color: F.ink3 }}>
-                          {e.time?.includes('·') ? e.time.split('·')[1]?.trim() : e.time}
-                        </Text>
-                        <Text style={{ fontSize: 13 }}>{e.mood}</Text>
+                        {e.mood && <Text style={{ fontSize: 13 }}>{e.mood}</Text>}
                         {e.recurring && (
                           <View style={{ backgroundColor: F.lilac, borderRadius: 99,
                             paddingHorizontal: 7, paddingVertical: 2 }}>
@@ -135,15 +133,15 @@ export default function PotDetail({ route, navigation }) {
                         )}
                       </View>
                     </View>
-
-                    {/* Amount + carbon */}
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ fontSize: 17, color: F.ink, fontWeight: '500' }}>
                         −{sym}{e.amount.toFixed(2)}
                       </Text>
-                      <Text style={{ fontSize: 11, color: F.sageD }}>
-                        {e.carbon} kg CO₂
-                      </Text>
+                      {e.carbon ? (
+                        <Text style={{ fontSize: 11, color: F.sageD }}>
+                          {e.carbon} kg CO₂
+                        </Text>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 ))}

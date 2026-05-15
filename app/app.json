@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Drift",
+    "slug": "drift-expense-manager",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#fdf6f0"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Drift uses your camera to scan receipt photos for automatic line-item extraction.",
+        "NSPhotoLibraryUsageDescription": "Drift can read receipts from your photo library."
+      }
+    },
+    "android": {
+      "package": "com.drift.expensemanager",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#fdf6f0"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
+      ],
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        { "cameraPermission": "Drift uses your camera to scan receipts." }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Drift can read receipts from your photo library.",
+          "cameraPermission": "Drift uses your camera to scan receipts."
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

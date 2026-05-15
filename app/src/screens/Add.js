@@ -4,16 +4,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../hooks/useAppState';
 import { MoodPicker } from '../components/UI';
 
-const KEYS = ['1','2','3','4','5','6','7','8','9','.','0','⌫'];
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
+const MOODS = ['😍', '😌', '😐', '😬', '😞'];
 
 export default function Add({ navigation }) {
-  const { F, sym, pots, addExpense } = useApp();
+  const { F, sym, pots, addExpense, settings } = useApp();
   const insets = useSafeAreaInsets();
-  const [amount, setAmount] = useState('0.00');
+  const [amount, setAmount]     = useState('0.00');
   const [merchant, setMerchant] = useState('');
-  const [potKey, setPotKey] = useState(pots[0]?.key || 'food');
-  const [mood, setMood] = useState(1);
+  const [potId, setPotId]       = useState(pots[0]?.id || null);
+  const [mood, setMood]         = useState(1);
   const [recurring, setRecurring] = useState(false);
+  const [saving, setSaving]     = useState(false);
 
   const press = (key) => {
     setAmount(prev => {
@@ -29,29 +31,52 @@ export default function Add({ navigation }) {
     });
   };
 
-  const moods = ['😍','😌','😐','😬','😞'];
-  const selectedPot = pots.find(p => p.key === potKey);
+  const selected = pots.find(p => p.id === potId);
 
-  const save = () => {
+  const save = async () => {
     if (parseFloat(amount) === 0) return Alert.alert('Enter an amount');
     if (!merchant.trim()) return Alert.alert('Enter a merchant name');
-    addExpense({
-      merchant: merchant.trim(),
-      cat: selectedPot?.label || 'Other',
-      icon: selectedPot?.emoji || '💰',
-      amount: parseFloat(amount),
-      time: 'Just now',
-      mood: moods[mood],
-      carbon: 0.4,
-      potKey,
-      recurring,
-    });
-    navigation.goBack();
+    if (!selected) return Alert.alert('Pick a category');
+    setSaving(true);
+    try {
+      await addExpense({
+        category_id: selected.id,
+        merchant: merchant.trim(),
+        amount: parseFloat(amount),
+        mood: MOODS[mood],
+        carbon: settings.carbon_tracking ? 0.4 : 0,
+        recurring,
+      });
+      navigation.goBack();
+    } catch (err) {
+      Alert.alert('Could not save', err.message || String(err));
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (pots.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: F.bg, padding: 24,
+        alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 40, marginBottom: 12 }}>🍃</Text>
+        <Text style={{ fontSize: 16, color: F.ink, fontWeight: '500' }}>No categories yet</Text>
+        <Text style={{ fontSize: 13, color: F.ink2, marginTop: 8, textAlign: 'center' }}>
+          Add a category from Profile → Manage categories before logging spends.
+        </Text>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={{ marginTop: 24, backgroundColor: F.coral, borderRadius: 12,
+            paddingVertical: 12, paddingHorizontal: 32 }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700' }}>OK</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: F.bg }}>
-      {/* Header */}
       <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 12,
         flexDirection: 'row', alignItems: 'center', backgroundColor: F.surface,
         borderBottomWidth: 1, borderBottomColor: F.line }}>
@@ -59,13 +84,14 @@ export default function Add({ navigation }) {
           <Text style={{ color: F.ink2, fontSize: 16 }}>Cancel</Text>
         </TouchableOpacity>
         <Text style={{ flex: 1, textAlign: 'center', fontSize: 18, color: F.ink, fontWeight: '400' }}>Add a spend</Text>
-        <TouchableOpacity onPress={save}>
-          <Text style={{ color: F.coral, fontSize: 16, fontWeight: '700' }}>Save</Text>
+        <TouchableOpacity onPress={save} disabled={saving}>
+          <Text style={{ color: F.coral, fontSize: 16, fontWeight: '700', opacity: saving ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Save'}
+          </Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20 }}>
-        {/* Amount display */}
         <View style={{ backgroundColor: F.cream, borderRadius: 24, padding: 24, marginTop: 16,
           alignItems: 'center' }}>
           <Text style={{ fontSize: 11, color: F.ink2 }}>I spent</Text>
@@ -79,14 +105,13 @@ export default function Add({ navigation }) {
               textAlign: 'center', fontSize: 15, color: F.ink, paddingBottom: 4, width: '80%' }}/>
         </View>
 
-        {/* Category */}
         <Text style={{ fontSize: 15, color: F.ink, marginTop: 20, marginBottom: 10 }}>What kind?</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
           <View style={{ flexDirection: 'row', gap: 8, paddingBottom: 4 }}>
             {pots.map(p => {
-              const sel = potKey === p.key;
+              const sel = potId === p.id;
               return (
-                <TouchableOpacity key={p.key} onPress={() => setPotKey(p.key)}
+                <TouchableOpacity key={p.id} onPress={() => setPotId(p.id)}
                   style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 99,
                     backgroundColor: sel ? F.coral : F.surface,
                     borderWidth: 1, borderColor: sel ? F.coral : F.line,
@@ -99,20 +124,20 @@ export default function Add({ navigation }) {
           </View>
         </ScrollView>
 
-        {/* Mood */}
         <Text style={{ fontSize: 15, color: F.ink, marginTop: 20, marginBottom: 10 }}>How did it feel?</Text>
         <View style={{ backgroundColor: F.surface, borderRadius: 20, padding: 16,
           borderWidth: 1, borderColor: F.line, marginBottom: 16 }}>
           <MoodPicker value={mood} onChange={setMood} F={F}/>
         </View>
 
-        {/* Carbon + recurring */}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
-          <View style={{ flex: 1, backgroundColor: F.mint, borderRadius: 18, padding: 14 }}>
-            <Text style={{ fontSize: 11, color: F.ink2 }}>🌱 Carbon</Text>
-            <Text style={{ fontSize: 20, color: F.sageD, marginTop: 6 }}>0.4 kg</Text>
-            <Text style={{ fontSize: 10, color: F.ink3 }}>low impact ✿</Text>
-          </View>
+          {settings.carbon_tracking ? (
+            <View style={{ flex: 1, backgroundColor: F.mint, borderRadius: 18, padding: 14 }}>
+              <Text style={{ fontSize: 11, color: F.ink2 }}>🌱 Carbon</Text>
+              <Text style={{ fontSize: 20, color: F.sageD, marginTop: 6 }}>0.4 kg</Text>
+              <Text style={{ fontSize: 10, color: F.ink3 }}>low impact ✿</Text>
+            </View>
+          ) : <View style={{ flex: 1 }}/>}
           <TouchableOpacity onPress={() => setRecurring(!recurring)}
             style={{ flex: 1, backgroundColor: recurring ? F.lilac : F.sky, borderRadius: 18, padding: 14 }}>
             <Text style={{ fontSize: 11, color: F.ink2 }}>🔄 Repeat?</Text>
@@ -124,7 +149,6 @@ export default function Add({ navigation }) {
         </View>
       </ScrollView>
 
-      {/* Keypad */}
       <View style={{ backgroundColor: F.surface, borderTopWidth: 1, borderTopColor: F.line,
         paddingHorizontal: 12, paddingTop: 12, paddingBottom: insets.bottom + 12 }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>

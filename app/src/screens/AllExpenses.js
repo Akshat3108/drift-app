@@ -7,11 +7,11 @@ import { potBg } from '../theme';
 export default function AllExpenses({ navigation, route }) {
   const { F, sym, pots, expenses } = useApp();
   const insets = useSafeAreaInsets();
-  const initialPot = route.params?.potKey || 'all';
+  const initialPot = route.params?.potId || 'all';
   const [filter, setFilter] = useState(initialPot);
 
   const filtered = useMemo(
-    () => filter === 'all' ? expenses : expenses.filter(e => e.potKey === filter),
+    () => filter === 'all' ? expenses : expenses.filter(e => e.category_id === filter),
     [filter, expenses],
   );
   const total = filtered.reduce((s, e) => s + e.amount, 0);
@@ -19,7 +19,7 @@ export default function AllExpenses({ navigation, route }) {
   const grouped = useMemo(() => {
     const map = {};
     filtered.forEach(e => {
-      const day = (e.time?.split('·')[0] || e.time || 'Other').trim();
+      const day = e.expense_date || 'Other';
       if (!map[day]) map[day] = [];
       map[day].push(e);
     });
@@ -28,26 +28,22 @@ export default function AllExpenses({ navigation, route }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: F.bg }}>
-      {/* Filter pills */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={{ flexGrow: 0, borderBottomWidth: 1, borderBottomColor: F.line, backgroundColor: F.surface }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}>
-        <FilterPill active={filter === 'all'} onPress={() => setFilter('all')} F={F}>
-          All
-        </FilterPill>
+        <FilterPill active={filter === 'all'} onPress={() => setFilter('all')} F={F}>All</FilterPill>
         {pots.map(p => (
-          <FilterPill key={p.key} active={filter === p.key} onPress={() => setFilter(p.key)} F={F}>
-            <Text>{p.emoji} </Text>{p.label}
+          <FilterPill key={p.id} active={filter === p.id} onPress={() => setFilter(p.id)} F={F}>
+            {p.emoji} {p.label}
           </FilterPill>
         ))}
       </ScrollView>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}>
-        {/* Summary */}
         <View style={{ backgroundColor: F.cream, borderRadius: 20, padding: 18, marginBottom: 18 }}>
           <Text style={{ fontSize: 12, color: F.ink2 }}>
             {filtered.length} {filtered.length === 1 ? 'spend' : 'spends'}
-            {filter !== 'all' && ` · ${pots.find(p => p.key === filter)?.label || ''}`}
+            {filter !== 'all' && ` · ${pots.find(p => p.id === filter)?.label || ''}`}
           </Text>
           <Text style={{ fontSize: 38, color: F.ink, fontWeight: '400', marginTop: 4 }}>
             {sym}{total.toFixed(2)}
@@ -72,33 +68,30 @@ export default function AllExpenses({ navigation, route }) {
               </View>
               <View style={{ backgroundColor: F.surface, borderRadius: 18,
                 borderWidth: 1, borderColor: F.line, overflow: 'hidden' }}>
-                {items.map((e, i) => {
-                  const pot = pots.find(p => p.key === e.potKey);
-                  return (
-                    <TouchableOpacity key={e.id} onPress={() => navigation.navigate('Detail', { id: e.id })}
-                      activeOpacity={0.7}
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
-                        borderTopWidth: i ? 1 : 0, borderTopColor: F.line,
-                      }}>
-                      <View style={{
-                        width: 42, height: 42, borderRadius: 13,
-                        backgroundColor: potBg(F, pot?.color || 'cream'),
-                        alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Text style={{ fontSize: 20 }}>{e.icon}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 14, fontWeight: '600', color: F.ink }}>{e.merchant}</Text>
-                        <Text style={{ fontSize: 12, color: F.ink2 }}>
-                          {e.cat} · <Text>{e.mood}</Text>
-                          {e.recurring ? '  · recurring' : ''}
-                        </Text>
-                      </View>
-                      <Text style={{ fontSize: 16, color: F.ink }}>−{sym}{e.amount.toFixed(2)}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                {items.map((e, i) => (
+                  <TouchableOpacity key={e.id} onPress={() => navigation.navigate('Detail', { id: e.id })}
+                    activeOpacity={0.7}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
+                      borderTopWidth: i ? 1 : 0, borderTopColor: F.line,
+                    }}>
+                    <View style={{
+                      width: 42, height: 42, borderRadius: 13,
+                      backgroundColor: potBg(F, e.category_color || 'cream'),
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ fontSize: 20 }}>{e.category_emoji || '💰'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: F.ink }}>{e.merchant}</Text>
+                      <Text style={{ fontSize: 12, color: F.ink2 }}>
+                        {e.category_name || 'Uncategorised'}{e.mood ? `  ${e.mood}` : ''}
+                        {e.recurring ? '  · recurring' : ''}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 16, color: F.ink }}>−{sym}{e.amount.toFixed(2)}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           ))

@@ -1,0 +1,18 @@
+How to use it:
+
+  1. Save it somewhere you can find quickly (a snippet manager, a .txt file, or pin it in your terminal).
+  2. At session start, paste it as the first message.
+  3. I'll read the tracker, give you a 6-line status, and stop.
+  4. Then type the task ID you want to work on.
+
+  What this guarantees:
+
+  - All 15 operating rules re-established verbatim — no drift between sessions.
+  - The tracker is the contract; I cannot lose track of completed work as long as the markdown is intact.
+  - I cannot auto-pick a task or skip the approval gate.
+  - Cross-reference closure (QW-01 ⇄ 1.4, QW-02 ⇄ 2.18, etc.) is explicit in the contract so I won't forget to flip both checkboxes.
+  - Git commits remain opt-in by you.
+
+  Two things this prompt does NOT do (intentionally):
+  - It does not list completed tasks inline — that would go stale fast. The tracker is the source.
+  - It does not pre-select the next task — Rule 1 forbids me from picking, and you may want to deviate from sequential order.

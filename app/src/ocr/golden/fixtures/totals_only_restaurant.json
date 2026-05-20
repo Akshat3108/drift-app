@@ -1,0 +1,36 @@
+{
+  "name": "totals_only_utility",
+  "notes": "Utility (electricity) bill — no line items, just bill-level total. Tests the 'totals-only' strategy and that the parser doesn't synthesize items.",
+  "pots": [
+    {"id": 1, "name": "Utilities"},
+    {"id": 2, "name": "Groceries"}
+  ],
+  "expected": {
+    "merchant": "MSEB",
+    "date": "2026-04-10",
+    "total": 1845.50,
+    "format": "utility",
+    "items": []
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "lines": [
+          {"text": "Maharashtra State Electricity Board", "frame": {"left": 280, "top": 60, "width": 840, "height": 30}, "elements": [{"text": "Maharashtra", "frame": {"left": 280, "width": 220}}, {"text": "State", "frame": {"left": 520, "width": 100}}, {"text": "Electricity", "frame": {"left": 640, "width": 200}}, {"text": "Board", "frame": {"left": 860, "width": 100}}]},
+          {"text": "Consumer No: 1234567890", "frame": {"left": 100, "top": 130, "width": 500, "height": 22}, "elements": []},
+          {"text": "Billing Period: Mar 2026", "frame": {"left": 100, "top": 160, "width": 500, "height": 22}, "elements": []},
+          {"text": "Due Date: 10/04/2026", "frame": {"left": 100, "top": 190, "width": 500, "height": 22}, "elements": []},
+          {"text": "Meter No: MH-PN-998123", "frame": {"left": 100, "top": 220, "width": 500, "height": 22}, "elements": []},
+          {"text": "Previous Reading: 4521", "frame": {"left": 100, "top": 260, "width": 500, "height": 22}, "elements": []},
+          {"text": "Current Reading: 4742", "frame": {"left": 100, "top": 290, "width": 500, "height": 22}, "elements": []},
+          {"text": "Units Consumed: 221", "frame": {"left": 100, "top": 320, "width": 500, "height": 22}, "elements": []},
+          {"text": "Energy Charges: 1542.00", "frame": {"left": 100, "top": 370, "width": 500, "height": 22}, "elements": []},
+          {"text": "Fixed Charges: 110.00", "frame": {"left": 100, "top": 400, "width": 500, "height": 22}, "elements": []},
+          {"text": "Tariff Tax: 193.50", "frame": {"left": 100, "top": 430, "width": 500, "height": 22}, "elements": []},
+          {"text": "Total Amount Due: 1845.50", "frame": {"left": 100, "top": 490, "width": 500, "height": 26}, "elements": []}
+        ],
+        "frame": {"left": 100, "top": 60, "width": 1100, "height": 470}
+      }
+    ]
+  }
+}

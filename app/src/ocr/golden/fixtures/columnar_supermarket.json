@@ -1,0 +1,42 @@
+{
+  "name": "columnar_supermarket_reliance",
+  "notes": "Wide-spaced columnar receipt — Item | Qty | Rate | Amount columns clearly separated by whitespace. Tests the columnar extractor (4.13).",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Health"}
+  ],
+  "expected": {
+    "merchant": "Reliance Smart",
+    "date": "2026-04-20",
+    "total": 392.00,
+    "format": "departmental",
+    "items": [
+      {"name": "Amul Milk 1L", "price": 68.00},
+      {"name": "Britannia Bread 400g", "price": 45.00},
+      {"name": "Eggs Tray 30", "price": 180.00},
+      {"name": "Onions 1kg", "price": 35.00},
+      {"name": "Potato 1kg", "price": 28.00}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "lines": [
+          {"text": "Reliance Smart", "frame": {"left": 500, "top": 60, "width": 400, "height": 36}, "elements": [{"text": "Reliance", "frame": {"left": 500, "width": 180}}, {"text": "Smart", "frame": {"left": 700, "width": 200}}]},
+          {"text": "Andheri West, Mumbai", "frame": {"left": 480, "top": 110, "width": 440, "height": 22}, "elements": [{"text": "Andheri", "frame": {"left": 480, "width": 130}}, {"text": "West,", "frame": {"left": 620, "width": 90}}, {"text": "Mumbai", "frame": {"left": 720, "width": 200}}]},
+          {"text": "GSTIN 27AABCR4321F1Z9", "frame": {"left": 480, "top": 140, "width": 440, "height": 22}, "elements": [{"text": "GSTIN", "frame": {"left": 480, "width": 100}}, {"text": "27AABCR4321F1Z9", "frame": {"left": 590, "width": 330}}]},
+          {"text": "20-04-2026", "frame": {"left": 100, "top": 180, "width": 200, "height": 22}, "elements": [{"text": "20-04-2026", "frame": {"left": 100, "width": 200}}]},
+          {"text": "Item             Qty       Rate     Amount", "frame": {"left": 80, "top": 240, "width": 1400, "height": 22}, "elements": [{"text": "Item", "frame": {"left": 80, "width": 70}}, {"text": "Qty", "frame": {"left": 600, "width": 50}}, {"text": "Rate", "frame": {"left": 900, "width": 60}}, {"text": "Amount", "frame": {"left": 1280, "width": 110}}]},
+          {"text": "Amul Milk 1L     1         68.00    68.00", "frame": {"left": 80, "top": 290, "width": 1400, "height": 22}, "elements": [{"text": "Amul", "frame": {"left": 80, "width": 80}}, {"text": "Milk", "frame": {"left": 170, "width": 70}}, {"text": "1L", "frame": {"left": 250, "width": 40}}, {"text": "1", "frame": {"left": 610, "width": 20}}, {"text": "68.00", "frame": {"left": 900, "width": 100}}, {"text": "68.00", "frame": {"left": 1280, "width": 110}}]},
+          {"text": "Britannia Bread 400g  1  45.00   45.00", "frame": {"left": 80, "top": 320, "width": 1400, "height": 22}, "elements": [{"text": "Britannia", "frame": {"left": 80, "width": 160}}, {"text": "Bread", "frame": {"left": 250, "width": 100}}, {"text": "400g", "frame": {"left": 360, "width": 80}}, {"text": "1", "frame": {"left": 610, "width": 20}}, {"text": "45.00", "frame": {"left": 900, "width": 100}}, {"text": "45.00", "frame": {"left": 1280, "width": 110}}]},
+          {"text": "Eggs Tray 30     1        180.00   180.00", "frame": {"left": 80, "top": 350, "width": 1400, "height": 22}, "elements": [{"text": "Eggs", "frame": {"left": 80, "width": 80}}, {"text": "Tray", "frame": {"left": 170, "width": 80}}, {"text": "30", "frame": {"left": 260, "width": 40}}, {"text": "1", "frame": {"left": 610, "width": 20}}, {"text": "180.00", "frame": {"left": 890, "width": 110}}, {"text": "180.00", "frame": {"left": 1270, "width": 120}}]},
+          {"text": "Onions 1kg       1         35.00    35.00", "frame": {"left": 80, "top": 380, "width": 1400, "height": 22}, "elements": [{"text": "Onions", "frame": {"left": 80, "width": 120}}, {"text": "1kg", "frame": {"left": 210, "width": 60}}, {"text": "1", "frame": {"left": 610, "width": 20}}, {"text": "35.00", "frame": {"left": 900, "width": 100}}, {"text": "35.00", "frame": {"left": 1280, "width": 110}}]},
+          {"text": "Potato 1kg       1         28.00    28.00", "frame": {"left": 80, "top": 410, "width": 1400, "height": 22}, "elements": [{"text": "Potato", "frame": {"left": 80, "width": 120}}, {"text": "1kg", "frame": {"left": 210, "width": 60}}, {"text": "1", "frame": {"left": 610, "width": 20}}, {"text": "28.00", "frame": {"left": 900, "width": 100}}, {"text": "28.00", "frame": {"left": 1280, "width": 110}}]},
+          {"text": "Bill Total                              392.00", "frame": {"left": 80, "top": 480, "width": 1400, "height": 22}, "elements": []},
+          {"text": "Items: 5     CGST 9.00 SGST 9.00", "frame": {"left": 80, "top": 510, "width": 1400, "height": 22}, "elements": []}
+        ],
+        "frame": {"left": 80, "top": 60, "width": 1400, "height": 480}
+      }
+    ]
+  }
+}

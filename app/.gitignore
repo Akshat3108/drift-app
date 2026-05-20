@@ -18,6 +18,9 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Release signing secrets (defence-in-depth; /android is already gitignored below)
+keystore.properties
+
 # Metro
 .metro-health-check*
 

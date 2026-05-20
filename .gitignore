@@ -16,6 +16,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+docs/keystorepasswd.txt
+**/keystore.properties
 
 # Expo / React Native build artifacts
 .expo

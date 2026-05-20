@@ -1,0 +1,38 @@
+{
+  "name": "fuel_petrol_iocl",
+  "notes": "IOCL petrol slip with inline 'litres x rate = amount' shape. Tests the fuel extractor (4.16).",
+  "pots": [
+    {"id": 1, "name": "Transport"},
+    {"id": 2, "name": "Groceries"}
+  ],
+  "expected": {
+    "merchant": "IOCL",
+    "date": "2026-04-25",
+    "total": 1302.40,
+    "format": "fuel",
+    "items": [
+      {"name": "Petrol", "price": 1302.40}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "lines": [
+          {"text": "INDIAN OIL CORPORATION", "frame": {"left": 380, "top": 80, "width": 640, "height": 36}, "elements": [{"text": "INDIAN", "frame": {"left": 380, "width": 160}}, {"text": "OIL", "frame": {"left": 560, "width": 80}}, {"text": "CORPORATION", "frame": {"left": 660, "width": 360}}]},
+          {"text": "Pune Highway Outlet", "frame": {"left": 460, "top": 130, "width": 480, "height": 22}, "elements": [{"text": "Pune", "frame": {"left": 460, "width": 90}}, {"text": "Highway", "frame": {"left": 560, "width": 160}}, {"text": "Outlet", "frame": {"left": 730, "width": 110}}]},
+          {"text": "GSTIN 27AABCI9201Q1Z3", "frame": {"left": 460, "top": 160, "width": 480, "height": 22}, "elements": []},
+          {"text": "Date: 25/04/2026   Time: 14:22", "frame": {"left": 100, "top": 200, "width": 600, "height": 22}, "elements": []},
+          {"text": "Nozzle: 03   Density: 0.741", "frame": {"left": 100, "top": 230, "width": 500, "height": 22}, "elements": []},
+          {"text": "Petrol", "frame": {"left": 100, "top": 280, "width": 200, "height": 28}, "elements": [{"text": "Petrol", "frame": {"left": 100, "width": 200}}]},
+          {"text": "12.345 L x 105.50 = 1302.40", "frame": {"left": 100, "top": 320, "width": 700, "height": 22}, "elements": [{"text": "12.345", "frame": {"left": 100, "width": 110}}, {"text": "L", "frame": {"left": 220, "width": 20}}, {"text": "x", "frame": {"left": 250, "width": 20}}, {"text": "105.50", "frame": {"left": 280, "width": 110}}, {"text": "=", "frame": {"left": 400, "width": 20}}, {"text": "1302.40", "frame": {"left": 430, "width": 120}}]},
+          {"text": "Rate per Ltr: 105.50", "frame": {"left": 100, "top": 360, "width": 400, "height": 22}, "elements": []},
+          {"text": "CGST 14%   91.17", "frame": {"left": 100, "top": 410, "width": 400, "height": 22}, "elements": []},
+          {"text": "SGST 14%   91.17", "frame": {"left": 100, "top": 440, "width": 400, "height": 22}, "elements": []},
+          {"text": "Total Amount: 1302.40", "frame": {"left": 100, "top": 490, "width": 500, "height": 26}, "elements": []},
+          {"text": "Payment: UPI", "frame": {"left": 100, "top": 530, "width": 300, "height": 22}, "elements": []}
+        ],
+        "frame": {"left": 80, "top": 80, "width": 1400, "height": 480}
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "tabular_grocery_dmart",
+  "notes": "DMart-style tabular grocery receipt. Items have qty as a trailing integer column, price as the final amount. Bill-level CGST+SGST present (intrastate).",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Transport"},
+    {"id": 3, "name": "Health"}
+  ],
+  "expected": {
+    "merchant": "DMart",
+    "date": "2026-04-15",
+    "total": 487.50,
+    "format": "departmental",
+    "items": [
+      {"name": "Tata Salt 1kg", "price": 28.00},
+      {"name": "Maggi Noodles 70g", "price": 14.00},
+      {"name": "Surf Excel 1kg", "price": 185.00},
+      {"name": "Bananas", "price": 60.00},
+      {"name": "Tomatoes", "price": 40.00},
+      {"name": "Atta 5kg", "price": 245.00}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "lines": [
+          {"text": "DMART", "frame": {"left": 600, "top": 80, "width": 200, "height": 40}, "elements": [{"text": "DMART", "frame": {"left": 600, "width": 200}}]},
+          {"text": "Avenue Supermarts Ltd", "frame": {"left": 460, "top": 130, "width": 480, "height": 24}, "elements": [{"text": "Avenue", "frame": {"left": 460, "width": 130}}, {"text": "Supermarts", "frame": {"left": 600, "width": 220}}, {"text": "Ltd", "frame": {"left": 830, "width": 60}}]},
+          {"text": "GSTIN: 27AABCD1234E1Z5", "frame": {"left": 460, "top": 160, "width": 480, "height": 22}, "elements": [{"text": "GSTIN:", "frame": {"left": 460, "width": 100}}, {"text": "27AABCD1234E1Z5", "frame": {"left": 570, "width": 370}}]},
+          {"text": "Date: 15/04/2026", "frame": {"left": 100, "top": 200, "width": 280, "height": 22}, "elements": [{"text": "Date:", "frame": {"left": 100, "width": 70}}, {"text": "15/04/2026", "frame": {"left": 180, "width": 200}}]},
+          {"text": "Invoice No: INV20260415-7821", "frame": {"left": 100, "top": 230, "width": 460, "height": 22}, "elements": [{"text": "Invoice", "frame": {"left": 100, "width": 100}}, {"text": "No:", "frame": {"left": 210, "width": 50}}, {"text": "INV20260415-7821", "frame": {"left": 270, "width": 290}}]},
+          {"text": "Item                          Qty    Amount", "frame": {"left": 80, "top": 280, "width": 1400, "height": 22}, "elements": [{"text": "Item", "frame": {"left": 80, "width": 80}}, {"text": "Qty", "frame": {"left": 900, "width": 50}}, {"text": "Amount", "frame": {"left": 1300, "width": 120}}]},
+          {"text": "Tata Salt 1kg                 1      28.00", "frame": {"left": 80, "top": 320, "width": 1400, "height": 22}, "elements": [{"text": "Tata", "frame": {"left": 80, "width": 70}}, {"text": "Salt", "frame": {"left": 160, "width": 70}}, {"text": "1kg", "frame": {"left": 240, "width": 60}}, {"text": "1", "frame": {"left": 920, "width": 20}}, {"text": "28.00", "frame": {"left": 1330, "width": 100}}]},
+          {"text": "Maggi Noodles 70g             2      14.00", "frame": {"left": 80, "top": 350, "width": 1400, "height": 22}, "elements": [{"text": "Maggi", "frame": {"left": 80, "width": 90}}, {"text": "Noodles", "frame": {"left": 180, "width": 130}}, {"text": "70g", "frame": {"left": 320, "width": 60}}, {"text": "2", "frame": {"left": 920, "width": 20}}, {"text": "14.00", "frame": {"left": 1330, "width": 100}}]},
+          {"text": "Surf Excel 1kg                1     185.00", "frame": {"left": 80, "top": 380, "width": 1400, "height": 22}, "elements": [{"text": "Surf", "frame": {"left": 80, "width": 70}}, {"text": "Excel", "frame": {"left": 160, "width": 90}}, {"text": "1kg", "frame": {"left": 260, "width": 60}}, {"text": "1", "frame": {"left": 920, "width": 20}}, {"text": "185.00", "frame": {"left": 1320, "width": 110}}]},
+          {"text": "Bananas                       1      60.00", "frame": {"left": 80, "top": 410, "width": 1400, "height": 22}, "elements": [{"text": "Bananas", "frame": {"left": 80, "width": 140}}, {"text": "1", "frame": {"left": 920, "width": 20}}, {"text": "60.00", "frame": {"left": 1330, "width": 100}}]},
+          {"text": "Tomatoes                      1      40.00", "frame": {"left": 80, "top": 440, "width": 1400, "height": 22}, "elements": [{"text": "Tomatoes", "frame": {"left": 80, "width": 160}}, {"text": "1", "frame": {"left": 920, "width": 20}}, {"text": "40.00", "frame": {"left": 1330, "width": 100}}]},
+          {"text": "Atta 5kg                      1     245.00", "frame": {"left": 80, "top": 470, "width": 1400, "height": 22}, "elements": [{"text": "Atta", "frame": {"left": 80, "width": 80}}, {"text": "5kg", "frame": {"left": 170, "width": 60}}, {"text": "1", "frame": {"left": 920, "width": 20}}, {"text": "245.00", "frame": {"left": 1320, "width": 110}}]},
+          {"text": "Subtotal                          572.00", "frame": {"left": 80, "top": 540, "width": 1400, "height": 22}, "elements": []},
+          {"text": "Discount                          -97.50", "frame": {"left": 80, "top": 570, "width": 1400, "height": 22}, "elements": []},
+          {"text": "CGST 2.5%                          6.81", "frame": {"left": 80, "top": 600, "width": 1400, "height": 22}, "elements": []},
+          {"text": "SGST 2.5%                          6.19", "frame": {"left": 80, "top": 630, "width": 1400, "height": 22}, "elements": []},
+          {"text": "Net Payable                      487.50", "frame": {"left": 80, "top": 670, "width": 1400, "height": 22}, "elements": []}
+        ],
+        "frame": {"left": 80, "top": 80, "width": 1400, "height": 620}
+      }
+    ]
+  }
+}

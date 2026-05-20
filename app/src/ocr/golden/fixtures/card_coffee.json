@@ -1,0 +1,41 @@
+{
+  "name": "card_coffee_starbucks",
+  "notes": "Starbucks-style card layout — each item is two lines (name on one, qty + amount on the next). Tests the 'card' strategy.",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Food & Drink"}
+  ],
+  "expected": {
+    "merchant": "Starbucks",
+    "date": "2026-04-22",
+    "total": 615.00,
+    "format": "restaurant",
+    "items": [
+      {"name": "Caffe Latte Grande", "price": 295.00},
+      {"name": "Chocolate Croissant", "price": 220.00},
+      {"name": "Bottled Water", "price": 100.00}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "lines": [
+          {"text": "STARBUCKS COFFEE", "frame": {"left": 480, "top": 80, "width": 440, "height": 32}, "elements": [{"text": "STARBUCKS", "frame": {"left": 480, "width": 240}}, {"text": "COFFEE", "frame": {"left": 740, "width": 180}}]},
+          {"text": "Bandra Linking Road", "frame": {"left": 500, "top": 130, "width": 400, "height": 22}, "elements": [{"text": "Bandra", "frame": {"left": 500, "width": 120}}, {"text": "Linking", "frame": {"left": 630, "width": 120}}, {"text": "Road", "frame": {"left": 760, "width": 140}}]},
+          {"text": "22 Apr 2026, 18:42", "frame": {"left": 100, "top": 180, "width": 300, "height": 22}, "elements": [{"text": "22", "frame": {"left": 100, "width": 40}}, {"text": "Apr", "frame": {"left": 150, "width": 60}}, {"text": "2026,", "frame": {"left": 220, "width": 100}}, {"text": "18:42", "frame": {"left": 330, "width": 70}}]},
+          {"text": "Order #874512", "frame": {"left": 100, "top": 210, "width": 220, "height": 22}, "elements": [{"text": "Order", "frame": {"left": 100, "width": 90}}, {"text": "#874512", "frame": {"left": 200, "width": 120}}]},
+          {"text": "Caffe Latte Grande", "frame": {"left": 100, "top": 260, "width": 400, "height": 24}, "elements": [{"text": "Caffe", "frame": {"left": 100, "width": 90}}, {"text": "Latte", "frame": {"left": 200, "width": 90}}, {"text": "Grande", "frame": {"left": 300, "width": 140}}]},
+          {"text": "Qty 1                            295.00", "frame": {"left": 100, "top": 290, "width": 700, "height": 22}, "elements": [{"text": "Qty", "frame": {"left": 100, "width": 50}}, {"text": "1", "frame": {"left": 160, "width": 20}}, {"text": "295.00", "frame": {"left": 700, "width": 110}}]},
+          {"text": "Chocolate Croissant", "frame": {"left": 100, "top": 330, "width": 400, "height": 24}, "elements": [{"text": "Chocolate", "frame": {"left": 100, "width": 180}}, {"text": "Croissant", "frame": {"left": 290, "width": 160}}]},
+          {"text": "Qty 1                            220.00", "frame": {"left": 100, "top": 360, "width": 700, "height": 22}, "elements": [{"text": "Qty", "frame": {"left": 100, "width": 50}}, {"text": "1", "frame": {"left": 160, "width": 20}}, {"text": "220.00", "frame": {"left": 700, "width": 110}}]},
+          {"text": "Bottled Water", "frame": {"left": 100, "top": 400, "width": 280, "height": 24}, "elements": [{"text": "Bottled", "frame": {"left": 100, "width": 130}}, {"text": "Water", "frame": {"left": 240, "width": 100}}]},
+          {"text": "Qty 1                            100.00", "frame": {"left": 100, "top": 430, "width": 700, "height": 22}, "elements": [{"text": "Qty", "frame": {"left": 100, "width": 50}}, {"text": "1", "frame": {"left": 160, "width": 20}}, {"text": "100.00", "frame": {"left": 700, "width": 110}}]},
+          {"text": "Sub Total                        615.00", "frame": {"left": 100, "top": 510, "width": 700, "height": 22}, "elements": []},
+          {"text": "Grand Total                      615.00", "frame": {"left": 100, "top": 560, "width": 700, "height": 22}, "elements": []},
+          {"text": "Visit again, KOT 482", "frame": {"left": 100, "top": 620, "width": 400, "height": 22}, "elements": []}
+        ],
+        "frame": {"left": 100, "top": 80, "width": 800, "height": 580}
+      }
+    ]
+  }
+}

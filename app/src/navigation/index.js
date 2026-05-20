@@ -1,125 +1,83 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useApp } from '../hooks/useAppState';
+import { useTheme } from '../core/theme/ThemeContext';
+import CustomTabBar from './CustomTabBar';
 
-import HomeScreen        from '../screens/Home';
-import ScanScreen        from '../screens/Scan';
-import TrendsScreen      from '../screens/Trends';
-import SubsScreen        from '../screens/Subs';
-import AddScreen         from '../screens/Add';
-import DetailScreen      from '../screens/Detail';
-import PotDetailScreen   from '../screens/PotDetail';
-import GoalsScreen       from '../screens/Goals';
-import ProfileScreen     from '../screens/Profile';
-import NetWorthScreen    from '../screens/NetWorth';
-import TravelScreen      from '../screens/Travel';
-import AllExpensesScreen from '../screens/AllExpenses';
-import ItemsScreen       from '../screens/Items';
-import ItemTrendScreen   from '../screens/ItemTrend';
-import EditExpense       from '../screens/EditExpense';
-import EditPot           from '../screens/EditPot';
-import EditSub           from '../screens/EditSub';
-import EditGoal          from '../screens/EditGoal';
-import EditAccount       from '../screens/EditAccount';
-import EditTrip          from '../screens/EditTrip';
+import HomeScreen        from '@features/home/screens/Home';
+import ScanScreen        from '@features/scan/screens/Scan';
+import TrendsScreen      from '@features/trends/screens/Trends';
+import SubsScreen        from '@features/subs/screens/Subs';
+import AddScreen         from '@features/expenses/screens/Add';
+import DetailScreen      from '@features/expenses/screens/Detail';
+import PotDetailScreen   from '@features/categories/screens/PotDetail';
+import GoalsScreen       from '@features/goals/screens/Goals';
+import ProfileScreen     from '@features/profile/screens/Profile';
+import ExportScreen      from '@features/profile/screens/Export';
+import NetWorthScreen    from '@features/accounts/screens/NetWorth';
+import TravelScreen      from '@features/travel/screens/Travel';
+import AllExpensesScreen from '@features/expenses/screens/AllExpenses';
+import SearchScreen      from '@features/expenses/screens/Search';
+import MerchantsScreen       from '@features/expenses/screens/Merchants';
+import MerchantDetailScreen  from '@features/expenses/screens/MerchantDetail';
+import ItemsScreen       from '@features/items/screens/Items';
+import ItemTrendScreen   from '@features/items/screens/ItemTrend';
+import EditExpenseScreen from '@features/expenses/screens/EditExpense';
+import EditPotScreen     from '@features/categories/screens/EditPot';
+import EditSubScreen     from '@features/subs/screens/EditSub';
+import EditGoalScreen    from '@features/goals/screens/EditGoal';
+import EditAccountScreen from '@features/accounts/screens/EditAccount';
+import EditTripScreen    from '@features/travel/screens/EditTrip';
+
+import { withBoundary } from '../components/ErrorBoundary';
+
+const Home        = withBoundary('Home',        HomeScreen);
+const Scan        = withBoundary('Scan',        ScanScreen);
+const Trends      = withBoundary('Trends',      TrendsScreen);
+const Subs        = withBoundary('Subs',        SubsScreen);
+const Add         = withBoundary('Add',         AddScreen);
+const Detail      = withBoundary('Detail',      DetailScreen);
+const PotDetail   = withBoundary('PotDetail',   PotDetailScreen);
+const Goals       = withBoundary('Goals',       GoalsScreen);
+const Profile     = withBoundary('Profile',     ProfileScreen);
+const Export      = withBoundary('Export',      ExportScreen);
+const NetWorth    = withBoundary('NetWorth',    NetWorthScreen);
+const Travel      = withBoundary('Travel',      TravelScreen);
+const AllExpenses    = withBoundary('AllExpenses',    AllExpensesScreen);
+const Search         = withBoundary('Search',         SearchScreen);
+const Merchants      = withBoundary('Merchants',      MerchantsScreen);
+const MerchantDetail = withBoundary('MerchantDetail', MerchantDetailScreen);
+const Items       = withBoundary('Items',       ItemsScreen);
+const ItemTrend   = withBoundary('ItemTrend',   ItemTrendScreen);
+const EditExpense = withBoundary('EditExpense', EditExpenseScreen);
+const EditPot     = withBoundary('EditPot',     EditPotScreen);
+const EditSub     = withBoundary('EditSub',     EditSubScreen);
+const EditGoal    = withBoundary('EditGoal',    EditGoalScreen);
+const EditAccount = withBoundary('EditAccount', EditAccountScreen);
+const EditTrip    = withBoundary('EditTrip',    EditTripScreen);
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const TAB_ICONS = { Home: '🏠', Scan: '📷', Trends: '📊', Subs: '🔄' };
-
-function CustomTabBar({ state, navigation }) {
-  const { F } = useApp();
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View style={{
-      flexDirection: 'row',
-      backgroundColor: F.surface,
-      borderTopWidth: 1,
-      borderTopColor: F.line,
-      paddingTop: 10,
-      paddingHorizontal: 8,
-      paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      elevation: 12,
-    }}>
-      {state.routes.map((route, index) => {
-        const focused = state.index === index;
-
-        if (route.name === 'Add') {
-          return (
-            <TouchableOpacity
-              key={route.key}
-              onPress={() => navigation.navigate('Add')}
-              activeOpacity={0.85}
-              style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <View style={{
-                width: 54, height: 54, borderRadius: 17,
-                backgroundColor: F.coral,
-                alignItems: 'center', justifyContent: 'center',
-                marginTop: -22,
-                shadowColor: F.coral,
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.45,
-                shadowRadius: 12,
-                elevation: 10,
-              }}>
-                <Text style={{ fontSize: 30, color: '#fff', lineHeight: 36 }}>+</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        }
-
-        return (
-          <TouchableOpacity
-            key={route.key}
-            onPress={() => navigation.navigate(route.name)}
-            activeOpacity={0.65}
-            style={{ flex: 1, alignItems: 'center', gap: 3 }}
-          >
-            <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>
-              {TAB_ICONS[route.name]}
-            </Text>
-            <Text style={{
-              fontSize: 10.5,
-              color: focused ? F.coral : F.ink3,
-              fontWeight: focused ? '700' : '500',
-            }}>
-              {route.name}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
+const renderTabBar = (props) => <CustomTabBar {...props}/>;
 
 function Tabs() {
   return (
     <Tab.Navigator
-      tabBar={props => <CustomTabBar {...props}/>}
+      tabBar={renderTabBar}
       screenOptions={{ headerShown: false }}
     >
-      <Tab.Screen name="Home"   component={HomeScreen}/>
-      <Tab.Screen name="Scan"   component={ScanScreen}/>
-      <Tab.Screen name="Add"    component={AddScreen}/>
-      <Tab.Screen name="Trends" component={TrendsScreen}/>
-      <Tab.Screen name="Subs"   component={SubsScreen}/>
+      <Tab.Screen name="Home"   component={Home}/>
+      <Tab.Screen name="Scan"   component={Scan}/>
+      <Tab.Screen name="Trends" component={Trends}/>
+      <Tab.Screen name="Subs"   component={Subs}/>
     </Tab.Navigator>
   );
 }
 
 export default function Navigation() {
-  const { F } = useApp();
+  const { F } = useTheme();
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{
@@ -129,18 +87,25 @@ export default function Navigation() {
         headerShadowVisible: false,
         contentStyle: { backgroundColor: F.bg },
       }}>
-        <Stack.Screen name="Tabs"        component={Tabs}            options={{ headerShown: false }}/>
-        <Stack.Screen name="Detail"      component={DetailScreen}    options={{ title: 'Spend detail' }}/>
-        <Stack.Screen name="PotDetail"   component={PotDetailScreen} options={({ route }) => ({
+        <Stack.Screen name="Tabs"        component={Tabs}        options={{ headerShown: false }}/>
+        <Stack.Screen name="Add"         component={Add}         options={{ presentation: 'modal', headerShown: false }}/>
+        <Stack.Screen name="Detail"      component={Detail}      options={{ title: 'Spend detail' }}/>
+        <Stack.Screen name="PotDetail"   component={PotDetail}   options={({ route }) => ({
           title: route.params?.potName || 'Pot detail',
         })}/>
-        <Stack.Screen name="Goals"       component={GoalsScreen}     options={{ title: 'Goals' }}/>
-        <Stack.Screen name="Profile"     component={ProfileScreen}   options={{ title: 'Profile' }}/>
-        <Stack.Screen name="NetWorth"    component={NetWorthScreen}  options={{ title: 'Net Worth' }}/>
-        <Stack.Screen name="Travel"      component={TravelScreen}    options={{ title: 'Travel' }}/>
-        <Stack.Screen name="AllExpenses" component={AllExpensesScreen} options={{ title: 'All transactions' }}/>
-        <Stack.Screen name="Items"       component={ItemsScreen}     options={{ title: 'Tracked items' }}/>
-        <Stack.Screen name="ItemTrend"   component={ItemTrendScreen} options={({ route }) => ({
+        <Stack.Screen name="Goals"       component={Goals}       options={{ title: 'Goals' }}/>
+        <Stack.Screen name="Profile"     component={Profile}     options={{ title: 'Profile' }}/>
+        <Stack.Screen name="Export"      component={Export}      options={{ presentation: 'modal', headerShown: false }}/>
+        <Stack.Screen name="NetWorth"    component={NetWorth}    options={{ title: 'Net Worth' }}/>
+        <Stack.Screen name="Travel"      component={Travel}      options={{ title: 'Travel' }}/>
+        <Stack.Screen name="AllExpenses" component={AllExpenses} options={{ title: 'All transactions' }}/>
+        <Stack.Screen name="Search"      component={Search}      options={{ presentation: 'modal', headerShown: false }}/>
+        <Stack.Screen name="Merchants"   component={Merchants}   options={{ title: 'Top merchants' }}/>
+        <Stack.Screen name="MerchantDetail" component={MerchantDetail} options={({ route }) => ({
+          title: route.params?.displayName || 'Merchant',
+        })}/>
+        <Stack.Screen name="Items"       component={Items}       options={{ title: 'Tracked items' }}/>
+        <Stack.Screen name="ItemTrend"   component={ItemTrend}   options={({ route }) => ({
           title: route.params?.displayName ? route.params.displayName.replace(/^./, c => c.toUpperCase()) : 'Item',
         })}/>
         <Stack.Screen name="EditExpense" component={EditExpense} options={{ title: 'Edit expense' }}/>

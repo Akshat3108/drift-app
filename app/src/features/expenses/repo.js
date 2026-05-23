@@ -3,6 +3,7 @@ import { NOT_DELETED, NOT_DELETED_C, NOT_DELETED_E } from '../../db/predicates';
 import { merchants } from './merchants.repo';
 import { sanitizeFtsQuery } from './search';
 import { buildWhere } from './filters';
+import { pantryRepo } from '@features/pantry/repo';
 
 // 5.3 — translate the legacy { categoryId, month } args into a `criteria`
 // object so the two list-call paths share one WHERE-builder. `month` here is
@@ -60,7 +61,7 @@ export const expenses = {
     );
   },
 
-  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id }) {
+  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id }) {
     // 5.9 — manual Add path now resolves the merchant text to merchants.id so
     // MerchantDetail + topMerchants can include quick-spend rows. Caller may
     // pass an explicit `merchant_id` (autocomplete picked a known merchant);
@@ -71,8 +72,8 @@ export const expenses = {
       ? merchant_id
       : await merchants.resolve(merchant);
     const res = await exec(
-      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?)`,
+      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?)`,
       [
         category_id ?? null,
         merchant,
@@ -85,6 +86,7 @@ export const expenses = {
         receipt_uri ?? null,
         expense_date ?? null,
         payment_method ?? null,
+        emi_loan_id ?? null,
       ]
     );
     return this.get(res.lastInsertRowId);
@@ -104,7 +106,7 @@ export const expenses = {
       `UPDATE expenses SET
         category_id = ?, merchant = ?, merchant_id = ?, amount = ?, mood = ?,
         carbon = ?, recurring = ?, notes = ?, receipt_uri = ?, expense_date = ?,
-        payment_method = ?
+        payment_method = ?, emi_loan_id = ?
        WHERE id = ?`,
       [
         next.category_id ?? null,
@@ -118,6 +120,7 @@ export const expenses = {
         next.receipt_uri ?? null,
         next.expense_date,
         next.payment_method ?? null,
+        next.emi_loan_id ?? null,
         id,
       ]
     );
@@ -303,8 +306,8 @@ export const expenses = {
         `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date,
                                gstin, invoice_number, cgst, sgst, igst,
                                receipt_hash, receipt_soft_hash, payment_method,
-                               receipt_path, receipt_thumb, receipt_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               receipt_path, receipt_thumb, receipt_bytes, emi_loan_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           expense.category_id ?? null,
           expense.merchant,
@@ -327,6 +330,7 @@ export const expenses = {
           expense.receipt_path ?? null,
           expense.receipt_thumb ?? null,
           expense.receipt_bytes ?? null,
+          expense.emi_loan_id ?? null,
         ]
       );
       createdId = res.lastInsertRowId;
@@ -362,6 +366,15 @@ export const expenses = {
         );
       }
     });
+    // 7.7 — auto-populate the pantry from the just-inserted items. Runs AFTER
+    // the createWithItems transaction commits so the v12 AI trigger on
+    // receipt_items has already updated item_summary.points_count — that's
+    // the gating signal autoPopulateFromItems reads. Best-effort: a write
+    // error here must not unwind the expense save.
+    if (Array.isArray(items) && items.length > 0) {
+      try { await pantryRepo.autoPopulateFromItems(items); }
+      catch { /* non-fatal — pantry tracking is opt-in observability */ }
+    }
     return this.get(createdId);
   },
 
@@ -510,6 +523,22 @@ export const expenses = {
     );
   },
 
+  // 6.20 — distinct purchase dates at this merchant within the window. Used
+  // by MerchantDetail to compute the visit cadence (avg days between visits).
+  // Ordered ASC so a simple JS loop can compute consecutive intervals.
+  async merchantPurchaseDates({ merchantId, months = 12 }) {
+    if (merchantId == null) return [];
+    return all(
+      `SELECT DISTINCT e.expense_date AS expense_date
+         FROM expenses e
+        WHERE ${NOT_DELETED_E}
+          AND e.merchant_id = ?
+          AND e.month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
+        ORDER BY e.expense_date ASC`,
+      [merchantId, months]
+    );
+  },
+
   // Recent spends at this merchant for the bottom-of-screen list.
   async merchantRecents({ merchantId, limit = 30 } = {}) {
     if (merchantId == null) return [];
@@ -523,6 +552,44 @@ export const expenses = {
         ORDER BY e.expense_date DESC, e.id DESC
         LIMIT ?`,
       [merchantId, limit]
+    );
+  },
+
+  // 7.4 — day-level aggregation for the SpendCalendar month grid. One row
+  // per distinct expense_date within the month. Uses the v3 month_key virtual
+  // column + idx_exp_month index so the lookup is O(log n) followed by a
+  // sequential scan over only the month's rows (~300 typical). Soft-deleted
+  // rows filtered via NOT_DELETED.
+  async spendByDay(monthKey) {
+    if (!monthKey) return [];
+    return all(
+      `SELECT expense_date AS date,
+              SUM(amount)   AS total,
+              COUNT(*)      AS txn_count
+         FROM expenses
+        WHERE ${NOT_DELETED}
+          AND month_key = ?
+        GROUP BY expense_date
+        ORDER BY expense_date ASC`,
+      [monthKey]
+    );
+  },
+
+  // 7.4 — per-day expense list for the SpendCalendar selection callout.
+  // Returns the live expenses on a single day with the category join so the
+  // callout row can render emoji/colour inline (mirrors the list() shape).
+  async listByDate(date) {
+    if (!date) return [];
+    return all(
+      `SELECT e.id, e.merchant, e.amount, e.expense_date,
+              e.category_id, e.mood, e.payment_method,
+              c.name AS category_name, c.emoji AS category_emoji, c.color AS category_color
+         FROM expenses e
+         LEFT JOIN categories c ON c.id = e.category_id AND c.deleted_at IS NULL
+        WHERE e.deleted_at IS NULL
+          AND e.expense_date = ?
+        ORDER BY e.created_at DESC, e.id DESC`,
+      [date]
     );
   },
 

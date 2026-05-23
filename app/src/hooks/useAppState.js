@@ -2,16 +2,22 @@ import React, { useCallback, useMemo } from 'react';
 import { resetAll } from '../db';
 import { ThemeProvider, useTheme } from '@core/theme/ThemeContext';
 import { RefreshBusProvider, useRefreshBus } from '@core/state/RefreshBus';
+import { NotifyBusProvider } from '@core/state/NotifyBus';
 import { SettingsProvider, useSettings } from '@features/profile/settings.context';
 import { ProfileProvider,  useProfile  } from '@features/profile/context';
 import { ExpensesProvider, useExpenses } from '@features/expenses/context';
 import { IncomeProvider, useIncome } from '@features/income/context';
 import { CategoriesProvider, useCategories } from '@features/categories/context';
+import { TagsProvider, useTags } from '@features/tags/context';
 import { ItemsProvider, useItems } from '@features/items/context';
 import { SubsProvider, useSubs } from '@features/subs/context';
+import { EmiProvider, useEmi } from '@features/emi/context';
+import { FuelProvider, useFuel } from '@features/fuel/context';
+import { PantryProvider, usePantry } from '@features/pantry/context';
 import { GoalsProvider, useGoals } from '@features/goals/context';
 import { AccountsProvider, useAccounts } from '@features/accounts/context';
 import { TravelProvider, useTravel } from '@features/travel/context';
+import { NotificationsProvider, useNotifications } from '@features/notifications/context';
 
 // ── ThemeProvider needs to read dark_mode from SettingsContext, so it sits
 //    inside SettingsProvider but outside everything else. Tiny shim component
@@ -36,6 +42,11 @@ function ReadyGate({ children }) {
     useGoals().ready,
     useAccounts().ready,
     useTravel().ready,
+    useNotifications().ready,
+    useTags().ready,
+    useEmi().ready,
+    useFuel().ready,
+    usePantry().ready,
   ];
   if (!flags.every(Boolean)) return null;
   return children;
@@ -52,29 +63,41 @@ function ReadyGate({ children }) {
 export function AppRoot({ children }) {
   return (
     <RefreshBusProvider>
+     <NotifyBusProvider>
       <SettingsProvider>
         <ThemedChildren>
           <ProfileProvider>
             <ExpensesProvider>
               <IncomeProvider>
                 <CategoriesProvider>
+                 <TagsProvider>
                   <ItemsProvider>
                     <SubsProvider>
+                     <EmiProvider>
+                      <FuelProvider>
+                      <PantryProvider>
                       <GoalsProvider>
                         <AccountsProvider>
                           <TravelProvider>
-                            <ReadyGate>{children}</ReadyGate>
+                            <NotificationsProvider>
+                              <ReadyGate>{children}</ReadyGate>
+                            </NotificationsProvider>
                           </TravelProvider>
                         </AccountsProvider>
                       </GoalsProvider>
+                      </PantryProvider>
+                      </FuelProvider>
+                     </EmiProvider>
                     </SubsProvider>
                   </ItemsProvider>
+                 </TagsProvider>
                 </CategoriesProvider>
               </IncomeProvider>
             </ExpensesProvider>
           </ProfileProvider>
         </ThemedChildren>
       </SettingsProvider>
+     </NotifyBusProvider>
     </RefreshBusProvider>
   );
 }

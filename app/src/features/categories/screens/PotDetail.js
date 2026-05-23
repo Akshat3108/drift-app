@@ -45,6 +45,9 @@ function PotDetail({ route, navigation }) {
           </View>
           <TouchableOpacity
             onPress={() => navigation.navigate('EditPot', { id: pot.id })}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${pot.label} pot`}
             style={{ backgroundColor: F.surface, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99 }}
           >
             <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>Edit</Text>
@@ -60,13 +63,17 @@ function PotDetail({ route, navigation }) {
             <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>
               of {sym}{pot.budget} budget
               {over && (
-                <Text style={{ color: F.coral }}>  · over by {sym}{(pot.spend - pot.budget).toFixed(2)}</Text>
+                <Text style={{ color: F.coral }}>  · ⚠ over by {sym}{(pot.spend - pot.budget).toFixed(2)}</Text>
               )}
             </Text>
             <ProgressBar value={pot.spend} max={pot.budget}
               color={over ? F.coral : F.sageD} F={F} height={8}/>
+            {/* 2.D.19 — glyph prefix on the status labels. ⚠ over signals
+                breach; ✓ left signals safe. Color stays as redundant cue. */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-              <Text style={{ fontSize: 12, color: F.ink2 }}>{Math.round(pct * 100)}% used</Text>
+              <Text style={{ fontSize: 12, color: F.ink2 }}>
+                {over ? '⚠ ' : '✓ '}{Math.round(pct * 100)}% used
+              </Text>
               <Text style={{ fontSize: 12, color: F.ink2 }}>
                 {sym}{Math.max(0, pot.budget - pot.spend).toFixed(2)} left
               </Text>

@@ -1,6 +1,14 @@
 import { exec, one } from '../../db';
 
-const DEFAULTS = { currency: 'INR', dark_mode: 0, carbon_tracking: 1 };
+const DEFAULTS = {
+  currency: 'INR',
+  dark_mode: 0,
+  carbon_tracking: 1,
+  orientation_seen: 0,
+  notifications_enabled: 0,
+  notif_budget_threshold: 0.8,
+  notif_sub_lead_days: 3,
+};
 
 export const settings = {
   async get() {
@@ -11,16 +19,25 @@ export const settings = {
     const cur = await this.get();
     const next = { ...cur, ...patch };
     await exec(
-      `INSERT INTO settings (id, currency, dark_mode, carbon_tracking)
-       VALUES (1, ?, ?, ?)
+      `INSERT INTO settings (id, currency, dark_mode, carbon_tracking, orientation_seen,
+                             notifications_enabled, notif_budget_threshold, notif_sub_lead_days)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         currency = excluded.currency,
-         dark_mode = excluded.dark_mode,
-         carbon_tracking = excluded.carbon_tracking`,
+         currency               = excluded.currency,
+         dark_mode              = excluded.dark_mode,
+         carbon_tracking        = excluded.carbon_tracking,
+         orientation_seen       = excluded.orientation_seen,
+         notifications_enabled  = excluded.notifications_enabled,
+         notif_budget_threshold = excluded.notif_budget_threshold,
+         notif_sub_lead_days    = excluded.notif_sub_lead_days`,
       [
         next.currency,
         next.dark_mode ? 1 : 0,
         next.carbon_tracking ? 1 : 0,
+        next.orientation_seen ? 1 : 0,
+        next.notifications_enabled ? 1 : 0,
+        Number.isFinite(next.notif_budget_threshold) ? next.notif_budget_threshold : 0.8,
+        Number.isInteger(next.notif_sub_lead_days) ? next.notif_sub_lead_days : 3,
       ]
     );
     return this.get();

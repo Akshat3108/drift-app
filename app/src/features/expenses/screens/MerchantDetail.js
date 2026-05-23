@@ -20,22 +20,43 @@ function MerchantDetail({ route, navigation }) {
   const [breakdown, setBreakdown]   = useState([]);
   const [recents, setRecents]       = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(null);
+  // 6.20 — distinct purchase dates within the last 12 months. Used to
+  // compute avg cadence (days between visits).
+  const [purchaseDates, setPurchaseDates] = useState([]);
 
   useEffect(() => {
     if (merchantId == null) return;
     (async () => {
-      const [s, t, b, r] = await Promise.all([
+      const [s, t, b, r, d] = await Promise.all([
         expRepo.merchantSummary({ merchantId, months: 6 }),
         expRepo.merchantMonthlyTrend({ merchantId, months: 12 }),
         expRepo.merchantCategoryBreakdown({ merchantId, months: 12 }),
         expRepo.merchantRecents({ merchantId, limit: 30 }),
+        expRepo.merchantPurchaseDates({ merchantId, months: 12 }),
       ]);
       setSummary(s);
       setTrend(t);
       setBreakdown(b);
       setRecents(r);
+      setPurchaseDates(d.map((row) => row.expense_date).filter(Boolean));
     })();
   }, [merchantId]);
+
+  // 6.20 — cadence = avg days between consecutive distinct visit dates.
+  // Null when < 2 visits (can't compute an interval from one date).
+  const cadenceDays = useMemo(() => {
+    if (purchaseDates.length < 2) return null;
+    const intervals = [];
+    for (let i = 1; i < purchaseDates.length; i++) {
+      const prev = Date.parse(purchaseDates[i - 1] + 'T00:00:00Z');
+      const cur  = Date.parse(purchaseDates[i] + 'T00:00:00Z');
+      if (!Number.isFinite(prev) || !Number.isFinite(cur)) continue;
+      const days = Math.round((cur - prev) / 86400000);
+      if (days > 0) intervals.push(days);
+    }
+    if (intervals.length === 0) return null;
+    return Math.round(intervals.reduce((s, n) => s + n, 0) / intervals.length);
+  }, [purchaseDates]);
 
   const trendData = useMemo(() => trend.map((t) => t.total || 0), [trend]);
   const maxBar = trendData.length ? Math.max(...trendData) : 0;
@@ -70,11 +91,26 @@ function MerchantDetail({ route, navigation }) {
               </Text>
               <Text style={{ fontSize: 13, color: F.ink2 }}>last 6 months</Text>
             </View>
+            {/* 6.20 — all-time total surfaced under the window total. The summary
+                row already aggregates both; previous render only showed window. */}
+            {Number(summary.total_all) > Number(summary.total_window) && (
+              <Text style={{ fontSize: 12, color: F.ink3, marginTop: 2 }}>
+                {sym}{Number(summary.total_all).toFixed(0)} all-time across {summary.txn_count_all} visits
+              </Text>
+            )}
             <Text style={{ fontSize: 12, color: F.ink2, marginTop: 6 }}>
-              {summary.txn_count_all} visit{summary.txn_count_all === 1 ? '' : 's'} all-time ·
-              {' '}avg {sym}{Number(summary.avg_amount || 0).toFixed(0)}
+              avg {sym}{Number(summary.avg_amount || 0).toFixed(0)} per visit
               {summary.last_seen ? ` · last ${summary.last_seen}` : ''}
             </Text>
+            {/* 6.20 — visit cadence. Only when we have ≥ 2 distinct visits in the
+                last 12 months — fewer can't yield an interval. */}
+            {cadenceDays != null && (
+              <Text style={{ fontSize: 12, color: F.ink2, marginTop: 4 }}>
+                Cadence: <Text style={{ color: F.coral, fontWeight: '700' }}>
+                  every ~{cadenceDays}d
+                </Text> on average
+              </Text>
+            )}
           </>
         ) : (
           <Text style={{ fontSize: 13, color: F.ink2, marginTop: 6 }}>Loading…</Text>
@@ -135,9 +171,18 @@ function MerchantDetail({ route, navigation }) {
             borderColor: F.line, overflow: 'hidden' }}>
             {breakdown.map((b, i) => {
               const share = breakdownTotal > 0 ? (b.total / breakdownTotal) : 0;
+              // 6.20 — only category rows with a real id can deep-link; the
+              // uncategorised bucket (id null) renders as a plain view.
+              const Wrapper = b.id != null ? TouchableOpacity : View;
+              const wrapperProps = b.id != null ? {
+                activeOpacity: 0.7,
+                onPress: () => navigation.navigate('AllExpenses', {
+                  criteria: { merchantIds: [merchantId], categoryIds: [b.id] },
+                }),
+              } : {};
               return (
-                <View key={b.id ?? `unc-${i}`} style={{ padding: 14,
-                  borderTopWidth: i ? 1 : 0, borderTopColor: F.line }}>
+                <Wrapper key={b.id ?? `unc-${i}`} {...wrapperProps}
+                  style={{ padding: 14, borderTopWidth: i ? 1 : 0, borderTopColor: F.line }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Text style={{ fontSize: 18 }}>{b.emoji || '💰'}</Text>
                     <Text style={{ flex: 1, fontSize: 14, color: F.ink, fontWeight: '500' }}>
@@ -146,6 +191,7 @@ function MerchantDetail({ route, navigation }) {
                     <Text style={{ fontSize: 14, color: F.ink }}>
                       {sym}{Number(b.total).toFixed(0)}
                     </Text>
+                    {b.id != null && <Text style={{ fontSize: 14, color: F.ink3 }}>›</Text>}
                   </View>
                   <View style={{ marginTop: 8, height: 6, backgroundColor: F.cream,
                     borderRadius: 3, overflow: 'hidden' }}>
@@ -157,7 +203,7 @@ function MerchantDetail({ route, navigation }) {
                   <Text style={{ fontSize: 10, color: F.ink3, marginTop: 4 }}>
                     {b.txn_count} spend{b.txn_count === 1 ? '' : 's'} · {Math.round(share * 100)}%
                   </Text>
-                </View>
+                </Wrapper>
               );
             })}
           </View>

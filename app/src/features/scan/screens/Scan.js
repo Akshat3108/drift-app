@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useApp } from '../../../hooks/useAppState';
 import { useExpenses } from '@features/expenses/context';
+import { useFuel } from '@features/fuel/context';
 import { scanAndProcess, scanAndProcessMore, recalcItem, fingerprintReceipt, softFingerprint } from '@features/scan/ScanService';
 import { persistReceipt } from '@features/scan/receiptStorage';
 import { UNIT_OPTIONS } from '@core/domain/units';
@@ -17,6 +18,11 @@ import { templates as receiptTemplates } from '@features/scan/templates.repo';
 function Scan({ navigation }) {
   const { F, sym, pots, addExpenseWithItems } = useApp();
   const { findDuplicate } = useExpenses();
+  // 7.6 — Fuel & vehicle linkage. When the parser detects a fuel receipt and
+  // the user has at least one vehicle, the review screen surfaces a vehicle
+  // chip and saves the row via addFillup (atomic expense + fillup write)
+  // instead of the generic addExpenseWithItems path.
+  const { vehicles: fuelVehicles, addFillup, lastVehicleUsed } = useFuel();
   const toast = useToast();
   const insets = useSafeAreaInsets();
 
@@ -30,6 +36,13 @@ function Scan({ navigation }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [editingIdx, setEditingIdx] = useState(null);
   const [savingExpense, setSavingExpense] = useState(false);
+  const [format, setFormat]   = useState('');
+  // 7.6 — selected vehicle for the fuel-fillup write. null = "don't link to a
+  // vehicle, save as a normal expense". Initialised on processImage when
+  // parsed.format === 'fuel'.
+  const [vehicleId, setVehicleId] = useState(null);
+  // Optional odometer reading captured at scan time; null = unknown.
+  const [odometerKm, setOdometerKm] = useState('');
   const [formatLabel, setFormatLabel] = useState('');
   const [confidence, setConfidence]   = useState(null);
   const [fees, setFees]               = useState([]);
@@ -139,9 +152,25 @@ function Scan({ navigation }) {
       setItems(seededItems);
       setTotal(result.total);
       setFormatLabel(result.formatLabel);
+      setFormat(result.format);
       setConfidence(result.confidence);
       setFees(result.fees);
       setPotId(result.suggestedPotId);
+      // 7.6 — when this is a fuel receipt AND the user has at least one
+      // vehicle, default the vehicle chip to the most-recently-used vehicle
+      // (or the only vehicle, whichever resolves). Failure here is silent:
+      // the chip simply stays empty and save falls back to the generic path.
+      if (result.format === 'fuel' && fuelVehicles.length > 0) {
+        try {
+          const last = await lastVehicleUsed();
+          setVehicleId(last ?? fuelVehicles[0].id);
+        } catch {
+          setVehicleId(fuelVehicles[0].id);
+        }
+      } else {
+        setVehicleId(null);
+      }
+      setOdometerKm('');
       setTaxInvoice({
         gstin:          result.gstin,
         invoice_number: result.invoiceNumber,
@@ -341,7 +370,41 @@ function Scan({ navigation }) {
         receipt_thumb: stored.thumb,
         receipt_bytes: stored.bytes,
       } : expense;
-      await addExpenseWithItems({ expense: expenseWithStorage, items: validItems });
+      // 7.6 — fuel-receipt dual-write path. When the parser detected a fuel
+      // format AND the user has a vehicle selected on the chip, we route the
+      // save through addFillup which atomically inserts the expense row +
+      // the linked fuel_fillups row. The fuel line item carries qty=liters
+      // and price=total; we pull from validItems[0] when present and fall
+      // back to total when the user wiped the line. Falls through to the
+      // normal addExpenseWithItems path whenever vehicleId is null.
+      if (format === 'fuel' && vehicleId != null) {
+        const fuelItem = validItems[0] || null;
+        const litersN = fuelItem?.qty ?? null;
+        const ratePerL = fuelItem?.unit_price ?? null;
+        const ftype = fuelItem?.name
+          ? (/diesel/i.test(fuelItem.name) ? 'Diesel'
+            : /cng/i.test(fuelItem.name) ? 'CNG'
+            : /electric/i.test(fuelItem.name) ? 'Electric'
+            : 'Petrol')
+          : null;
+        const odoN = odometerKm.trim() ? parseFloat(odometerKm) : null;
+        await addFillup({
+          expense: expenseWithStorage,
+          fillup: {
+            vehicle_id: vehicleId,
+            fill_date: expense.expense_date || null,
+            liters: litersN ?? 0,
+            rate_per_l: ratePerL,
+            amount: expense.amount,
+            odometer_km: Number.isFinite(odoN) ? odoN : null,
+            is_full_tank: true,
+            fuel_type: ftype,
+            notes: null,
+          },
+        });
+      } else {
+        await addExpenseWithItems({ expense: expenseWithStorage, items: validItems });
+      }
       // 4.19 — fire-and-forget golden-candidate capture. Failures here must
       // not block the save UX (a write error on the candidate file would
       // still let the expense save succeed). Runs OFF the critical path.
@@ -428,6 +491,9 @@ function Scan({ navigation }) {
     setTotal(0);
     setEditingIdx(null);
     setFormatLabel('');
+    setFormat('');
+    setVehicleId(null);
+    setOdometerKm('');
     setConfidence(null);
     setFees([]);
     setTaxInvoice(null);
@@ -549,6 +615,63 @@ function Scan({ navigation }) {
               </View>
             </View>
 
+            {/* 7.6 — vehicle chip for fuel receipts. Only renders when the
+                parser detected a fuel format. Tapping "None" un-links the
+                fillup so the row saves as a normal expense. */}
+            {format === 'fuel' && fuelVehicles.length > 0 && (
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontSize: 11, color: F.ink3, marginBottom: 8, fontWeight: '700', letterSpacing: 1 }}>
+                  VEHICLE
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity onPress={() => setVehicleId(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Don't link to a vehicle"
+                      accessibilityState={{ selected: vehicleId == null }}
+                      style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
+                        backgroundColor: vehicleId == null ? F.coral : F.surface,
+                        borderWidth: 1, borderColor: vehicleId == null ? F.coral : F.line }}>
+                      <Text style={{ fontSize: 12, color: vehicleId == null ? '#fff' : F.ink2,
+                        fontWeight: vehicleId == null ? '600' : '400' }}>None</Text>
+                    </TouchableOpacity>
+                    {fuelVehicles.map((v) => {
+                      const sel = v.id === vehicleId;
+                      return (
+                        <TouchableOpacity key={v.id} onPress={() => setVehicleId(v.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Vehicle ${v.name}`}
+                          accessibilityState={{ selected: sel }}
+                          style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
+                            flexDirection: 'row', alignItems: 'center', gap: 5,
+                            backgroundColor: sel ? F.coral : F.surface,
+                            borderWidth: 1, borderColor: sel ? F.coral : F.line }}>
+                          <Text style={{ fontSize: 13 }}>{v.icon || '🚗'}</Text>
+                          <Text style={{ fontSize: 12, color: sel ? '#fff' : F.ink2,
+                            fontWeight: sel ? '600' : '400' }}>{v.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+                {vehicleId != null && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={{ fontSize: 10, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 4 }}>
+                      ODOMETER (KM, OPTIONAL)
+                    </Text>
+                    <TextInput
+                      value={odometerKm}
+                      onChangeText={setOdometerKm}
+                      placeholder="42150"
+                      placeholderTextColor={F.ink3}
+                      keyboardType="decimal-pad"
+                      style={{ paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: F.line,
+                        fontSize: 14, color: F.ink }}/>
+                  </View>
+                )}
+              </View>
+            )}
+
             <Text style={{ fontSize: 11, color: F.ink3, marginTop: 16, marginBottom: 8, fontWeight: '700', letterSpacing: 1 }}>
               SAVE TO CATEGORY
             </Text>
@@ -558,6 +681,10 @@ function Scan({ navigation }) {
                   const sel = potId === p.id;
                   return (
                     <TouchableOpacity key={p.id} onPress={() => setPotId(p.id)}
+                      hitSlop={{ top: 8, bottom: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Category: ${p.label}`}
+                      accessibilityState={{ selected: sel }}
                       style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
                         backgroundColor: sel ? F.coral : F.surface,
                         borderWidth: 1, borderColor: sel ? F.coral : F.line,
@@ -576,10 +703,16 @@ function Scan({ navigation }) {
               Items ({items.length})
             </Text>
             <View style={{ flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity onPress={recomputeTotal}>
+              <TouchableOpacity onPress={recomputeTotal}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Recompute total from items">
                 <Text style={{ color: F.coral, fontSize: 12, fontWeight: '600' }}>↺ Recompute total</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={addLine}>
+              <TouchableOpacity onPress={addLine}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Add a blank item line">
                 <Text style={{ color: F.coral, fontSize: 12, fontWeight: '600' }}>+ Add line</Text>
               </TouchableOpacity>
             </View>
@@ -608,6 +741,8 @@ function Scan({ navigation }) {
             <View style={{ backgroundColor: F.surface, borderRadius: 20, borderWidth: 1, borderColor: F.line, overflow: 'hidden' }}>
               {items.map((it, i) => (
                 <TouchableOpacity key={i} onPress={() => setEditingIdx(i)} activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit item ${it.name || 'unnamed'}, ${sym}${it.price.toFixed(2)}`}
                   style={{ padding: 14, borderTopWidth: i ? 1 : 0, borderTopColor: F.line }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: F.cream,
@@ -634,6 +769,8 @@ function Scan({ navigation }) {
               into the current review. Edits to existing rows are preserved
               by (_pageId, _origIdx) lookup in addPageFromPicker. */}
           <TouchableOpacity onPress={addAnotherPage} disabled={addingPage}
+            accessibilityRole="button"
+            accessibilityLabel={addingPage ? 'Adding page' : `Add page ${pageCount + 1} for long receipts`}
             style={{ marginTop: 20, padding: 12, borderRadius: 12,
               backgroundColor: F.cream, borderWidth: 1, borderColor: F.line,
               alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8,

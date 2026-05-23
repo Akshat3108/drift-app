@@ -1,7 +1,7 @@
 // 5.9 — Top-merchants leaderboard. Single repo call + window picker.
 // Sibling of Items / ItemTrend conceptually: Profile → list → detail.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
@@ -34,6 +34,15 @@ function Merchants({ navigation }) {
     setRefreshing(true);
     try { await load(); } finally { setRefreshing(false); }
   }, [load]);
+
+  // 6.20 — per-row share of the total window spend across the top merchants
+  // returned here. This is share-of-tracked-merchants (not share-of-all-spend)
+  // because that's what the leaderboard naturally implies. A merchant ranked
+  // #1 with 30% should immediately read as "almost a third of everything".
+  const totalWindow = useMemo(
+    () => rows.reduce((s, r) => s + (Number(r.total) || 0), 0),
+    [rows]
+  );
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: F.bg }}
@@ -87,9 +96,16 @@ function Merchants({ navigation }) {
                   {r.last_seen ? ` · last ${r.last_seen}` : ''}
                 </Text>
               </View>
-              <Text style={{ fontSize: 15, color: F.ink, fontWeight: '600' }}>
-                {sym}{Number(r.total).toFixed(0)}
-              </Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ fontSize: 15, color: F.ink, fontWeight: '600' }}>
+                  {sym}{Number(r.total).toFixed(0)}
+                </Text>
+                {totalWindow > 0 && (
+                  <Text style={{ fontSize: 10, color: F.ink3, fontWeight: '600' }}>
+                    {((Number(r.total) / totalWindow) * 100).toFixed(0)}% of top
+                  </Text>
+                )}
+              </View>
             </TouchableOpacity>
           ))}
         </View>

@@ -28,7 +28,10 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM"
       ],
       "edgeToEdgeEnabled": true
     },
@@ -42,6 +45,14 @@
         {
           "photosPermission": "Drift can read receipts from your photo library.",
           "cameraPermission": "Drift uses your camera to scan receipts."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#fdf6f0",
+          "mode": "production"
         }
       ]
     ],

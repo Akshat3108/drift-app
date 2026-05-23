@@ -37,6 +37,9 @@ export const MoodPicker = React.memo(function MoodPicker({ value, onChange, onCl
       <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
         {MOODS.map((m, i) => (
           <TouchableOpacity key={m.e} onPress={() => onChange(i)} activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Mood: ${m.l}`}
+            accessibilityState={{ selected: value === i }}
             style={{ width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
               backgroundColor: value === i ? F.cream : 'transparent',
               borderWidth: 2, borderColor: value === i ? F.coral : 'transparent' }}>

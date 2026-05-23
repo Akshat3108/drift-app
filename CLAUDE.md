@@ -39,6 +39,14 @@ cd app && npm run android
 # Release APK — signs with the production keystore if app/android/keystore.properties
 # exists; otherwise falls back to debug signing with a Gradle WARNING. See
 # docs/10-final/android-signing.md.
+#
+# IMPORTANT: When the user asks Claude for a "production build" / "release APK" / "new
+# APK for my phone" / equivalent, do NOT run this command directly. Follow the full
+# 6-step checklist in `docs/10-final/production-build-procedure.md` — it covers
+# pre-flight keystore checks, versionCode bump, signed-cert verification (so upgrades
+# install over the existing app without data loss), and staging the APK to
+# `~/Drift-builds/`. Skipping any step risks shipping a debug-signed APK, which forces
+# the user to uninstall + lose all data.
 cd app/android && ./gradlew :app:assembleRelease
 
 # Reset Metro cache after Babel config or alias changes

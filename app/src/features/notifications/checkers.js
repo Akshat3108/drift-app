@@ -1,0 +1,157 @@
+// Pure functions. Each checker takes its input slice + the relevant settings
+// and returns a plan: an array of {dedupe_key, kind, title, body, payload,
+// schedule:{type:'now'|'at', date?}} entries. The context layer turns each plan
+// item into (a) a notification_log row via repo.log() and (b) a scheduler call.
+//
+// Pure-function discipline means these are trivial to unit-test from a Node
+// validation harness without spinning up React Native.
+
+const BUDGET_BANDS = [
+  { pct: 0.80, label: '80%' },
+  { pct: 1.00, label: '100%' },
+];
+
+function currentMonthKey(now = new Date()) {
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function fmtAmount(n, sym = '₹') {
+  const v = Math.round(Number(n) || 0);
+  return `${sym}${v.toLocaleString('en-IN')}`;
+}
+
+// Pots are the joined category+spent rows from ExpensesProvider. A pot crosses
+// a band when (spent / budget) >= band.pct AND budget > 0. We emit one plan
+// item per (pot, band) and let the dedupe index in notification_log gate
+// repeat fires.
+export function evaluateBudgetThresholds({ pots, settings, monthKey = currentMonthKey(), sym = '₹' }) {
+  if (!settings?.notifications_enabled) return [];
+  const threshold = Number(settings?.notif_budget_threshold) || 0.8;
+  // Only fire bands AT or ABOVE the user's chosen threshold. The 100% band
+  // always fires when crossed (regardless of threshold) since that's the
+  // "over budget" alarm.
+  const activeBands = BUDGET_BANDS.filter(b => b.pct >= Math.min(threshold, 1.0));
+  const out = [];
+  for (const pot of (pots || [])) {
+    const budget = Number(pot.budget) || 0;
+    const spent = Number(pot.spend ?? pot.spent ?? 0);
+    if (budget <= 0) continue;
+    const ratio = spent / budget;
+    for (const band of activeBands) {
+      if (ratio < band.pct) continue;
+      const dedupe_key = `budget:${monthKey}:${pot.id}:${band.label}`;
+      const overUnder = band.pct >= 1.0 ? 'over budget' : `past ${band.label} of budget`;
+      out.push({
+        dedupe_key,
+        kind: 'budget_threshold',
+        title: `${pot.name || pot.label || 'Category'} ${overUnder}`,
+        body: `${fmtAmount(spent, sym)} of ${fmtAmount(budget, sym)} spent this month.`,
+        payload: { category_id: pot.id, month_key: monthKey, band: band.label, spent, budget },
+        schedule: { type: 'now' },
+      });
+    }
+  }
+  return out;
+}
+
+function atLocal0900(dateStr, leadDays) {
+  // dateStr is YYYY-MM-DD (subscriptions.next_bill format). We schedule for
+  // 09:00 local on (next_bill - leadDays).
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (!m) return null;
+  const due = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(due.getTime())) return null;
+  const trigger = new Date(due.getTime() - leadDays * 24 * 60 * 60 * 1000);
+  trigger.setHours(9, 0, 0, 0);
+  return trigger;
+}
+
+// Subs are the rows from useSubs().subs. We schedule one notification per
+// non-cancelled, non-deleted sub with a non-null next_bill, set
+// `notif_sub_lead_days` before the due date at 09:00 local. Schedule items
+// whose trigger is in the past are skipped (no late-fire).
+export function evaluateSubsDue({ subs, settings, now = new Date(), sym = '₹' }) {
+  if (!settings?.notifications_enabled) return [];
+  const leadDays = Number(settings?.notif_sub_lead_days);
+  if (!Number.isFinite(leadDays) || leadDays <= 0) return [];
+  const out = [];
+  for (const sub of (subs || [])) {
+    if (sub.cancelled) continue;
+    if (sub.deleted_at) continue;
+    if (!sub.next_bill) continue;
+    const trigger = atLocal0900(sub.next_bill, leadDays);
+    if (!trigger || trigger.getTime() <= now.getTime()) continue;
+    const dedupe_key = `sub:${sub.id}:${sub.next_bill}`;
+    const leadLabel = leadDays === 1 ? 'tomorrow' : `in ${leadDays} days`;
+    out.push({
+      dedupe_key,
+      kind: 'sub_due',
+      title: `${sub.name} due ${leadLabel}`,
+      body: `${fmtAmount(sub.amount, sym)} billed on ${sub.next_bill}.`,
+      payload: { sub_id: sub.id, next_bill: sub.next_bill, lead_days: leadDays },
+      schedule: { type: 'at', date: trigger, identifier: `sub:${sub.id}` },
+    });
+  }
+  return out;
+}
+
+// Stub for 7.1; 7.8 introduces the price_alerts table and wires this up.
+// Keeping the signature here means 7.8 only has to fill the body and the
+// notification_log kind already supports 'price_alert'.
+export function evaluatePriceAlerts(/* { items, alerts, settings, sym } */) {
+  return [];
+}
+
+// ISO-8601 week key in the form 'YYYY-Www'. Used by 7.7 to dedupe pantry
+// low-stock fires to one per item per week — a row that's been low for days
+// shouldn't re-fire on every expense save.
+function currentWeekKey(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // Thursday of the current week determines the ISO year.
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function fmtPantryQty(n, unit) {
+  const v = Number(n) || 0;
+  const s = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
+  return `${s} ${unit || ''}`.trim();
+}
+
+// 7.7 — Pantry low-stock checker.
+//
+// Fires once per (item, ISO week) when a live pantry row's current_qty is at
+// or below its reorder_threshold AND the threshold is non-NULL and > 0.
+// NULL thresholds are silently skipped — a fresh row never fires until the
+// user opts in via EditPantryItem.
+//
+// Dedupe key embeds the week so the notification re-arms next week if the
+// user still hasn't restocked, but doesn't spam on intra-week mutations.
+export function evaluatePantryLowStock({ pantry, settings, now = new Date() }) {
+  if (!settings?.notifications_enabled) return [];
+  const week = currentWeekKey(now);
+  const out = [];
+  for (const row of (pantry || [])) {
+    if (row.deleted_at) continue;
+    const threshold = row.reorder_threshold;
+    if (threshold == null) continue;
+    const tn = Number(threshold);
+    if (!(tn > 0)) continue;
+    const cur = Number(row.current_qty) || 0;
+    if (cur > tn) continue;
+    out.push({
+      dedupe_key: `pantry:${row.normalized_name}:${week}`,
+      kind: 'pantry_low_stock',
+      title: `Low on ${row.display_name}`,
+      body: `${fmtPantryQty(cur, row.canonical_unit)} left (threshold ${fmtPantryQty(tn, row.canonical_unit)}).`,
+      payload: { pantry_id: row.id, normalized_name: row.normalized_name, week },
+      schedule: { type: 'now' },
+    });
+  }
+  return out;
+}

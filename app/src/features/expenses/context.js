@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { expenses as expRepo } from './repo';
 import { items as itemRepo } from '@features/items/repo';
+import { tagsRepo } from '@features/tags/repo';
 import { useRegisterRefresh } from '@core/state/RefreshBus';
+import { useNotifyBus, NOTIFY_EVENTS } from '@core/state/NotifyBus';
 
 const ExpensesContext = createContext(null);
 
@@ -47,11 +49,16 @@ export function ExpensesProvider({ children }) {
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState({ pots: [], totalSpend: 0, monthBudget: 0 });
   const [ready, setReady] = useState(false);
+  const notifyBus = useNotifyBus();
 
   const refreshSummary = useCallback(async () => {
     const rows = await expRepo.summaryByCategory();
     setSummary(summaryFromRows(rows));
-  }, []);
+    // 7.1 — let the notifications provider re-evaluate budget thresholds against
+    // the freshly-rolled pot totals. Fire-and-forget; provider de-bounces its
+    // own work via the dedupe index.
+    notifyBus?.emit(NOTIFY_EVENTS.EXPENSE_CHANGED);
+  }, [notifyBus]);
 
   const refresh = useCallback(async () => {
     const [e, sumRows] = await Promise.all([
@@ -60,7 +67,8 @@ export function ExpensesProvider({ children }) {
     ]);
     setExpenses(e);
     setSummary(summaryFromRows(sumRows));
-  }, []);
+    notifyBus?.emit(NOTIFY_EVENTS.EXPENSE_CHANGED);
+  }, [notifyBus]);
 
   useEffect(() => {
     (async () => { await refresh(); setReady(true); })();
@@ -72,14 +80,25 @@ export function ExpensesProvider({ children }) {
   // their create/update paths, so we just splice it into place. refreshSummary
   // runs after the state update — single indexed GROUP BY query.
   const addExpense = useCallback(async (data) => {
-    const row = await expRepo.create(data);
+    // 7.3 — split tags out of the patch so the expenses table SQL isn't
+    // confused by an unknown column. `undefined` means "don't touch joins",
+    // an empty array means "clear all joins".
+    const { tags, ...rest } = data || {};
+    const row = await expRepo.create(rest);
+    if (Array.isArray(tags) && row?.id != null) {
+      await tagsRepo.setForExpense(row.id, tags);
+    }
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
     return row;
   }, [refreshSummary]);
 
   const updateExpense = useCallback(async (id, patch) => {
-    const row = await expRepo.update(id, patch);
+    const { tags, ...rest } = patch || {};
+    const row = await expRepo.update(id, rest);
+    if (Array.isArray(tags)) {
+      await tagsRepo.setForExpense(id, tags);
+    }
     if (row) setExpenses(prev => sortExpenses(prev.map(e => e.id === id ? row : e)));
     await refreshSummary();
   }, [refreshSummary]);
@@ -118,15 +137,25 @@ export function ExpensesProvider({ children }) {
   }, [refresh]);
 
   const addExpenseWithItems = useCallback(async ({ expense, items }) => {
-    const row = await expRepo.createWithItems({ expense, items });
+    // 7.3 — tags come through on the expense slice; pull them out before
+    // createWithItems writes the row (its INSERT doesn't know about tags).
+    const { tags, ...expenseRest } = expense || {};
+    const row = await expRepo.createWithItems({ expense: expenseRest, items });
+    if (Array.isArray(tags) && row?.id != null) {
+      await tagsRepo.setForExpense(row.id, tags);
+    }
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
     return row;
   }, [refreshSummary]);
 
   const updateExpenseWithItems = useCallback(async (id, patch, items) => {
-    const updated = await expRepo.update(id, patch);
+    const { tags, ...patchRest } = patch || {};
+    const updated = await expRepo.update(id, patchRest);
     await itemRepo.replaceItems(id, items, updated?.expense_date);
+    if (Array.isArray(tags)) {
+      await tagsRepo.setForExpense(id, tags);
+    }
     if (updated) setExpenses(prev => sortExpenses(prev.map(e => e.id === id ? updated : e)));
     await refreshSummary();
   }, [refreshSummary]);
@@ -145,6 +174,12 @@ export function ExpensesProvider({ children }) {
     monthlyTrend: (...a) => expRepo.monthlyTrend(...a),
     streakDays:   (...a) => expRepo.streakDays(...a),
     findDuplicate: (...a) => expRepo.findDuplicate(...a),
+    // 7.4 — day-aggregation + per-day list for the SpendCalendar screen.
+    spendByDay: (...a) => expRepo.spendByDay(...a),
+    listByDate: (...a) => expRepo.listByDate(...a),
+    // 7.3 — async read-through to the tags repo for screens that want the
+    // current tag set for a single expense (Edit/Detail).
+    tagsForExpense: (id) => tagsRepo.listForExpense(id),
   };
   return <ExpensesContext.Provider value={value}>{children}</ExpensesContext.Provider>;
 }

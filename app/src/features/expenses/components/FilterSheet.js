@@ -8,6 +8,7 @@ import { useApp } from '../../../hooks/useAppState';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { merchants as merchantRepo } from '@features/expenses/merchants.repo';
 import { savedFilters as savedFiltersRepo } from '@features/expenses/savedFilters.repo';
+import { useTags } from '@features/tags/context';
 import {
   normalizeCriteria, hasActiveFilters, criteriaToHumanLabel,
   PAYMENT_METHODS, PAYMENT_LABELS,
@@ -39,6 +40,7 @@ export default function FilterSheet({ visible, onClose, onApply, initialCriteria
   const { F } = useTheme();
   const toast = useToast();
   const { pots } = useApp();
+  const { tags } = useTags();
   const insets = useSafeAreaInsets();
 
   const [criteria, setCriteria] = useState(() => normalizeCriteria(initialCriteria || {}));
@@ -87,11 +89,13 @@ export default function FilterSheet({ visible, onClose, onApply, initialCriteria
 
   const categoryMap = useMemo(() => Object.fromEntries((pots || []).map((p) => [p.id, p])), [pots]);
   const merchantMap = useMemo(() => Object.fromEntries(merchants.map((m) => [m.id, m])), [merchants]);
+  const tagMap      = useMemo(() => Object.fromEntries((tags || []).map((t) => [t.id, t])), [tags]);
 
   const toggleCategory   = useCallback((id) => setCriteria((c) => ({ ...c, categoryIds: toggleInArray(c.categoryIds, id) })), []);
   const toggleMerchant   = useCallback((id) => setCriteria((c) => ({ ...c, merchantIds: toggleInArray(c.merchantIds, id) })), []);
   const toggleMood       = useCallback((m)  => setCriteria((c) => ({ ...c, moods: toggleInArray(c.moods, m) })), []);
   const togglePayment    = useCallback((p)  => setCriteria((c) => ({ ...c, paymentMethods: toggleInArray(c.paymentMethods, p) })), []);
+  const toggleTag        = useCallback((id) => setCriteria((c) => ({ ...c, tagIds: toggleInArray(c.tagIds, id) })), []);
   const setPreset        = useCallback((preset) => setCriteria((c) => preset === 'custom'
     ? { ...c, dateRange: { from: c.dateRange?.from || '', to: c.dateRange?.to || '' } }
     : { ...c, dateRange: preset === 'all' ? undefined : { preset } }), []);
@@ -150,7 +154,7 @@ export default function FilterSheet({ visible, onClose, onApply, initialCriteria
       Alert.alert('Nothing to save', 'Add at least one filter before saving.');
       return;
     }
-    setSavingName(criteriaToHumanLabel(criteria, { categoryMap, merchantMap }) || '');
+    setSavingName(criteriaToHumanLabel(criteria, { categoryMap, merchantMap, tagMap }) || '');
     setShowSaveSheet(true);
   };
 
@@ -310,6 +314,26 @@ export default function FilterSheet({ visible, onClose, onApply, initialCriteria
                   </Chip>
                 ))}
               </ChipRow>
+            </Section>
+
+            {/* 7.3 — tags. OR semantics: any-of-these selection matches an
+                expense that has at least one selected tag. */}
+            <Section F={F} title="Tags">
+              {tags.length === 0 ? (
+                <Text style={{ fontSize: 12, color: F.ink3 }}>
+                  No tags yet — add one when creating or editing an expense.
+                </Text>
+              ) : (
+                <ChipRow wrap>
+                  {tags.map((t) => (
+                    <Chip key={t.id} F={F}
+                      active={(criteria.tagIds || []).includes(t.id)}
+                      onPress={() => toggleTag(t.id)}>
+                      #{t.name}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              )}
             </Section>
           </ScrollView>
 

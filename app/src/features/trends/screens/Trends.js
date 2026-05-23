@@ -1,12 +1,57 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useExpenses } from '@features/expenses/context';
+import { expenses as expRepo } from '@features/expenses/repo';
 import { ProgressBar } from '@components/primitives/ProgressBar';
 import { palette, potBg } from '../../../theme';
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// 6.22 — three comparison modes for the screen.
+// 'current' is the legacy view (no per-pot delta, 6-month bar window).
+// 'mom' compares the current month against the previous calendar month.
+// 'yoy' compares against the same month one year ago and widens the bar
+// chart window to 24 months so the comparison anchor is visible on-screen.
+const MODES = [
+  { key: 'current', label: 'Current',        bars: 6,  shift: 0 },
+  { key: 'mom',     label: 'vs Prev mo',     bars: 6,  shift: -1 },
+  { key: 'yoy',     label: 'vs Same mo LY',  bars: 24, shift: -12 },
+];
+
+// Shift a 'YYYY-MM' key by a signed number of months. Used by MoM/YoY to
+// look up the comparison month in monthly_summary. Pure / null-safe.
+function shiftMonthKey(mk, deltaMonths) {
+  if (!mk || typeof mk !== 'string' || !mk.includes('-')) return null;
+  const [yStr, mStr] = mk.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+  const total = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
+// Δ% with direction. Returns null when prev is 0/null/undefined (no baseline
+// to compare against). Truncated to whole numbers for display compactness.
+export function monthDelta(thisTotal, prevTotal) {
+  if (!Number.isFinite(prevTotal) || prevTotal <= 0) return null;
+  if (!Number.isFinite(thisTotal)) thisTotal = 0;
+  const pct = ((thisTotal - prevTotal) / prevTotal) * 100;
+  const direction = pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat';
+  return { pct, direction };
+}
+
+// Friendly anchor month label for the comparison ("vs Apr '24"). Keeps
+// the year suffix because YoY mode renders two-year-old anchors.
+function anchorLabel(monthKey) {
+  if (!monthKey) return '';
+  const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return '';
+  return `${MONTH_NAMES[m - 1]} '${String(y).slice(-2)}`;
+}
 
 function Trends({ navigation }) {
   const { F, sym, pots, goals, totalSpend } = useApp();
@@ -14,29 +59,66 @@ function Trends({ navigation }) {
   const insets = useSafeAreaInsets();
   const pal = palette(F);
 
-  const [trend, setTrend] = useState([]);
-  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [mode, setMode]                       = useState('current');
+  const [trend, setTrend]                     = useState([]);
+  const [selectedMonth, setSelectedMonth]     = useState(null);
+  const [comparePots, setComparePots]         = useState([]); // [{id, spent}]
+  const [compareLabel, setCompareLabel]       = useState('');
 
+  const modeMeta = MODES.find((m) => m.key === mode) ?? MODES[0];
+  const today = useMemo(() => new Date().toISOString().slice(0, 7), []);
+  const anchorMonth = modeMeta.shift !== 0 ? shiftMonthKey(today, modeMeta.shift) : null;
+
+  // 1) Bar-chart trend. Width depends on mode (6 for current/mom, 24 for yoy).
   useEffect(() => {
-    monthlyTrend(6).then(rows => {
-      const enriched = rows.map(r => {
+    monthlyTrend(modeMeta.bars).then((rows) => {
+      const enriched = rows.map((r) => {
         const [y, m] = r.month_key.split('-');
         return {
+          key: r.month_key,
           m: MONTH_NAMES[parseInt(m, 10) - 1],
           full: MONTH_NAMES[parseInt(m, 10) - 1] + ' ' + y,
           v: r.total,
         };
       });
       setTrend(enriched);
-      if (enriched.length) setSelectedMonth(enriched.length - 1);
+      setSelectedMonth(enriched.length ? enriched.length - 1 : null);
     });
-  }, [monthlyTrend]);
+  }, [monthlyTrend, modeMeta.bars]);
 
-  const maxBar = trend.length ? Math.max(1, ...trend.map(d => d.v)) : 1;
+  // 2) Per-pot comparison spend. Only fired in mom/yoy modes — current mode
+  // shows no delta and we don't pay the extra round-trip.
+  useEffect(() => {
+    if (!anchorMonth) { setComparePots([]); setCompareLabel(''); return; }
+    let cancelled = false;
+    expRepo.summaryByCategory(anchorMonth).then((rows) => {
+      if (cancelled) return;
+      // rows: [{id, name, emoji, color, budget, sort_order, spent}]
+      setComparePots(rows.map((r) => ({ id: r.id, spent: r.spent })));
+      setCompareLabel(anchorLabel(anchorMonth));
+    });
+    return () => { cancelled = true; };
+  }, [anchorMonth]);
+
+  // Bar chart layout calcs.
+  const maxBar = trend.length ? Math.max(1, ...trend.map((d) => d.v)) : 1;
   const prevMonth = trend.length >= 2 ? trend[trend.length - 2] : null;
   const thisMonth = trend.length ? trend[trend.length - 1] : null;
-  const monthDelta = prevMonth && prevMonth.v > 0
-    ? ((thisMonth.v - prevMonth.v) / prevMonth.v) * 100 : null;
+
+  // Header chip — varies by mode. 'current' shows the legacy MoM-of-trend chip;
+  // 'mom' shows the same; 'yoy' compares against the YoY anchor.
+  let headerDelta = null;
+  let headerAnchorLabel = '';
+  if (mode === 'yoy' && thisMonth) {
+    const anchor = trend.find((d) => d.key === anchorMonth);
+    if (anchor) {
+      headerDelta = monthDelta(thisMonth.v, anchor.v);
+      headerAnchorLabel = anchor.full;
+    }
+  } else if (prevMonth && thisMonth) {
+    headerDelta = monthDelta(thisMonth.v, prevMonth.v);
+    headerAnchorLabel = prevMonth.full;
+  }
 
   return (
     <ScrollView
@@ -44,9 +126,39 @@ function Trends({ navigation }) {
       contentContainerStyle={{ paddingTop: insets.top + 16,
         paddingBottom: insets.bottom + 100, paddingHorizontal: 20 }}
     >
-      <Text style={{ fontSize: 26, color: F.ink, marginBottom: 20 }}>
+      <Text style={{ fontSize: 26, color: F.ink, marginBottom: 16 }}>
         Where it <Text style={{ color: F.coral, fontStyle: 'italic' }}>flowed</Text>
       </Text>
+
+      {/* 6.22 — comparison-mode pills. Hidden when no pots exist (the screen
+          shows the legacy empty-state instead, so the toggle would be moot). */}
+      {pots.length > 0 && (
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+          {MODES.map((mm) => {
+            const sel = mode === mm.key;
+            return (
+              <TouchableOpacity
+                key={mm.key}
+                onPress={() => setMode(mm.key)}
+                hitSlop={{ top: 8, bottom: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Compare ${mm.label}`}
+                accessibilityState={{ selected: sel }}
+                style={{
+                  flex: 1, paddingVertical: 9, borderRadius: 99,
+                  backgroundColor: sel ? F.coral : F.surface,
+                  borderWidth: 1, borderColor: sel ? F.coral : F.line,
+                  alignItems: 'center',
+                }}>
+                <Text style={{ color: sel ? '#fff' : F.ink2,
+                  fontWeight: sel ? '700' : '500', fontSize: 12 }}>
+                  {mm.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       <View style={{ backgroundColor: F.surface, borderRadius: 20, borderWidth: 1,
         borderColor: F.line, marginBottom: 16, overflow: 'hidden' }}>
@@ -57,6 +169,7 @@ function Trends({ navigation }) {
           <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>
             Total: <Text style={{ color: F.coral, fontWeight: '700' }}>{sym}{totalSpend.toFixed(0)}</Text>
             {'  '}this month
+            {compareLabel ? <Text style={{ color: F.ink3 }}>{` · vs ${compareLabel}`}</Text> : null}
           </Text>
         </View>
 
@@ -67,6 +180,11 @@ function Trends({ navigation }) {
         ) : pots.map((p, i) => {
           const pct = p.budget > 0 ? p.spend / p.budget : 0;
           const over = pct > 1;
+          // 6.22 — per-pot Δ vs comparison anchor. Null when mode='current'
+          // or when comparePots hasn't loaded yet or this pot didn't exist
+          // in the anchor month.
+          const prevSpent = comparePots.find((cp) => cp.id === p.id)?.spent;
+          const deltaInfo = anchorMonth ? monthDelta(p.spend, prevSpent) : null;
           return (
             <TouchableOpacity
               key={p.id}
@@ -82,7 +200,8 @@ function Trends({ navigation }) {
                 {over && (
                   <View style={{ backgroundColor: '#fde2dc', borderRadius: 99,
                     paddingHorizontal: 7, paddingVertical: 2 }}>
-                    <Text style={{ fontSize: 10, color: F.coral, fontWeight: '700' }}>over</Text>
+                    {/* 2.D.19 — ⚠ glyph backs up the coral fill for colorblind users. */}
+                    <Text style={{ fontSize: 10, color: F.coral, fontWeight: '700' }}>⚠ over</Text>
                   </View>
                 )}
                 <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
@@ -96,11 +215,28 @@ function Trends({ navigation }) {
                     </Text>
                     <Text style={{ fontSize: 11, color: over ? F.coral : F.sageD }}>
                       {over
-                        ? `${sym}${(p.spend - p.budget).toFixed(0)} over`
-                        : `${sym}${(p.budget - p.spend).toFixed(0)} left`}
+                        ? `⚠ ${sym}${(p.spend - p.budget).toFixed(0)} over`
+                        : `✓ ${sym}${(p.budget - p.spend).toFixed(0)} left`}
                     </Text>
                   </View>
                 </>
+              )}
+              {/* 6.22 — per-pot delta line. Only renders in mom/yoy with a
+                  loaded anchor and a non-null delta. F.ink3 weight 500 so it
+                  reads as a subtle annotation, not a competing primary value. */}
+              {deltaInfo && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <Text style={{ fontSize: 11,
+                    color: deltaInfo.direction === 'up' ? F.coral
+                         : deltaInfo.direction === 'down' ? F.sageD : F.ink3,
+                    fontWeight: '600' }}>
+                    {deltaInfo.direction === 'up' ? '↑' : deltaInfo.direction === 'down' ? '↓' : '·'}
+                    {' '}{Math.abs(deltaInfo.pct).toFixed(0)}%
+                  </Text>
+                  <Text style={{ fontSize: 11, color: F.ink3 }}>
+                    vs {compareLabel} ({sym}{Number(prevSpent || 0).toFixed(0)})
+                  </Text>
+                </View>
               )}
             </TouchableOpacity>
           );
@@ -136,11 +272,11 @@ function Trends({ navigation }) {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between',
             alignItems: 'center', marginBottom: 4 }}>
             <Text style={{ fontSize: 16, color: F.ink }}>{trend.length}-month trend</Text>
-            {monthDelta !== null && (
-              <View style={{ backgroundColor: monthDelta <= 0 ? F.mint : '#fde2dc',
+            {headerDelta !== null && (
+              <View style={{ backgroundColor: headerDelta.pct <= 0 ? F.mint : '#fde2dc',
                 borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 }}>
-                <Text style={{ color: monthDelta <= 0 ? F.sageD : F.coral, fontSize: 11, fontWeight: '600' }}>
-                  {monthDelta <= 0 ? '↓' : '↑'} {Math.abs(monthDelta).toFixed(0)}% vs prev
+                <Text style={{ color: headerDelta.pct <= 0 ? F.sageD : F.coral, fontSize: 11, fontWeight: '600' }}>
+                  {headerDelta.pct <= 0 ? '↓' : '↑'} {Math.abs(headerDelta.pct).toFixed(0)}% vs {headerAnchorLabel || 'prev'}
                 </Text>
               </View>
             )}
@@ -156,13 +292,15 @@ function Trends({ navigation }) {
             </View>
           )}
 
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, height: 100 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: trend.length > 12 ? 3 : 8, height: 100 }}>
             {trend.map((d, i) => {
               const barH = (d.v / maxBar) * 84;
               const isSelected = selectedMonth === i;
+              // Highlight the YoY anchor bar in MoM/YoY so the comparison is visually obvious.
+              const isAnchor = anchorMonth && d.key === anchorMonth;
               return (
                 <TouchableOpacity
-                  key={i}
+                  key={d.key || i}
                   onPress={() => setSelectedMonth(i)}
                   activeOpacity={0.75}
                   style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: 100 }}
@@ -173,18 +311,26 @@ function Trends({ navigation }) {
                     </Text>
                   )}
                   <View style={{
-                    width: '100%', height: barH, borderRadius: 6,
-                    backgroundColor: isSelected ? F.coral : F.blushD,
-                    opacity: isSelected ? 1 : 0.4,
+                    width: '100%', height: barH,
+                    borderRadius: trend.length > 12 ? 2 : 6,
+                    backgroundColor: isSelected ? F.coral : isAnchor ? F.sageD : F.blushD,
+                    opacity: isSelected ? 1 : isAnchor ? 0.85 : 0.4,
                   }}/>
-                  <Text style={{ fontSize: 10, color: isSelected ? F.coral : F.ink3,
-                    marginTop: 5, fontWeight: isSelected ? '700' : '400' }}>
-                    {d.m}
-                  </Text>
+                  {trend.length <= 12 && (
+                    <Text style={{ fontSize: 10, color: isSelected ? F.coral : F.ink3,
+                      marginTop: 5, fontWeight: isSelected ? '700' : '400' }}>
+                      {d.m}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               );
             })}
           </View>
+          {trend.length > 12 && (
+            <Text style={{ fontSize: 10, color: F.ink3, textAlign: 'center', marginTop: 6 }}>
+              {trend[0]?.full} → {trend[trend.length - 1]?.full}
+            </Text>
+          )}
         </View>
       )}
 

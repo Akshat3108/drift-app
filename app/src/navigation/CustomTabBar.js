@@ -3,14 +3,20 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../core/theme/ThemeContext';
 
-const TAB_ICONS = { Home: '🏠', Scan: '📷', Trends: '📊', Subs: '🔄' };
+// 6.21 — tab icon map reshuffled. Previous icons (Scan/Trends/Subs) retained
+// for back-compat in case a hot-reload session lands on the old tab list.
+const TAB_ICONS = {
+  Home: '🏠', Capture: '📷', Analytics: '📊', You: '👤',
+  // legacy:
+  Scan: '📷', Trends: '📊', Subs: '🔄',
+};
 
 const CustomTabBar = React.memo(function CustomTabBar({ state, navigation }) {
   const { F } = useTheme();
   const insets = useSafeAreaInsets();
 
   // Add is a modal Stack.Screen, not a tab — the + button lives between
-  // Scan (idx 1) and Trends (idx 2) and pushes onto the parent stack.
+  // Capture (idx 1) and Analytics (idx 2) and pushes onto the parent stack.
   const openAdd = () => navigation.getParent()?.navigate('Add');
 
   const tab = (route, index) => {
@@ -20,6 +26,9 @@ const CustomTabBar = React.memo(function CustomTabBar({ state, navigation }) {
         key={route.key}
         onPress={() => navigation.navigate(route.name)}
         activeOpacity={0.65}
+        accessibilityRole="tab"
+        accessibilityLabel={`${route.name} tab`}
+        accessibilityState={{ selected: focused }}
         style={{ flex: 1, alignItems: 'center', gap: 3 }}
       >
         <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>
@@ -58,6 +67,8 @@ const CustomTabBar = React.memo(function CustomTabBar({ state, navigation }) {
         key="add-modal"
         onPress={openAdd}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Add expense or income"
         style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
       >
         <View style={{

@@ -54,6 +54,10 @@ function Travel({ navigation }) {
             const sel = i === tripIdx;
             return (
               <TouchableOpacity key={t.id} onPress={() => setTripIdx(i)}
+                hitSlop={{ top: 8, bottom: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Trip: ${t.name}`}
+                accessibilityState={{ selected: sel }}
                 style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99,
                   backgroundColor: sel ? F.coral : F.surface,
                   borderWidth: 1, borderColor: sel ? F.coral : F.line }}>

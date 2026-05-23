@@ -108,10 +108,24 @@ function Subs({ navigation }) {
         <Text style={{ fontSize: 42, color: F.ink, fontWeight: '400', marginBottom: 4 }}>
           {sym}{total.toFixed(2)}<Text style={{ fontSize: 18, color: F.ink2 }}> /mo</Text>
         </Text>
-        <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 20 }}>
+        <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 10 }}>
           for {active.length} thing{active.length === 1 ? '' : 's'} ·{' '}
           <Text style={{ color: F.coral }}>{sym}{(total * 12).toFixed(0)}/yr</Text>
         </Text>
+
+        {subs.length > 0 && (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('SubCalendar')}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="View subscription calendar"
+            style={{ alignSelf: 'flex-start', marginBottom: 20 }}>
+            <Text style={{ color: F.coral, fontSize: 13, fontWeight: '600' }}>
+              View calendar →
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {cancellable.length > 0 && (
           <View style={{ backgroundColor: F.coral, borderRadius: 22, padding: 20, marginBottom: 20 }}>
@@ -159,6 +173,8 @@ function Subs({ navigation }) {
                 <TouchableOpacity key={key} onPress={() => setSortBy(key)} activeOpacity={0.75}
                   accessibilityRole="button"
                   accessibilityLabel={`Sort by ${label}`}
+                  accessibilityState={{ selected: sel }}
+                  hitSlop={{ top: 10, bottom: 10 }}
                   style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99,
                     backgroundColor: sel ? F.coral : F.surface,
                     borderWidth: 1, borderColor: sel ? F.coral : F.line }}>

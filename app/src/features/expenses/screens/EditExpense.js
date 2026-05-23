@@ -2,7 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
+import { useExpenses } from '@features/expenses/context';
 import { useItemActions } from '@features/items/context';
+import { useTags } from '@features/tags/context';
+import TagChipSurface from '@features/tags/components/TagChipSurface';
+import { useEmi } from '@features/emi/context';
 import { MoodPicker } from '@components/primitives/MoodPicker';
 import PaymentPicker from '@components/primitives/PaymentPicker';
 import ItemRows, { rowsFromExisting, toPersistedItems, rowsTotal } from '@components/ItemRows';
@@ -11,6 +15,9 @@ const MOODS = ['😍', '😌', '😐', '😬', '😞'];
 
 function EditExpense({ route, navigation }) {
   const { F, sym, expenses, pots, updateExpense, updateExpenseWithItems } = useApp();
+  const { tagsForExpense } = useExpenses();
+  const { tags: allTags, getOrCreateTag } = useTags();
+  const { loans: emiLoans } = useEmi();
   const { listByExpense, replaceItems } = useItemActions();
   const insets = useSafeAreaInsets();
   const e = expenses.find(x => x.id === route.params.id);
@@ -29,6 +36,15 @@ function EditExpense({ route, navigation }) {
   const [hadItems, setHadItems]   = useState(false);
   const [useItems, setUseItems]   = useState(false);
   const [saving, setSaving]       = useState(false);
+  // 7.3 — load the current tag set for this expense and let the user edit
+  // it. The expenses context's setForExpense diffs against the existing
+  // set on save, so an unchanged selection is a no-op.
+  const [tagNames, setTagNames]   = useState([]);
+  const [showTagInput, setShowTagInput]     = useState(false);
+  const [pendingTagName, setPendingTagName] = useState('');
+  // 7.5 — optional EMI loan link. `emi_loan_id` is a real column on
+  // expenses (v30) so it flows through update/updateWithItems patches.
+  const [emiLoanId, setEmiLoanId] = useState(e?.emi_loan_id ?? null);
 
   useEffect(() => {
     if (!e?.id) return;
@@ -39,6 +55,13 @@ function EditExpense({ route, navigation }) {
       setRows(existed ? rowsFromExisting(list) : []);
     }).catch(() => { setHadItems(false); setRows([]); });
   }, [e?.id, listByExpense]);
+
+  useEffect(() => {
+    if (!e?.id) return;
+    tagsForExpense(e.id).then((list) => {
+      setTagNames((list || []).map((t) => t.name));
+    }).catch(() => { setTagNames([]); });
+  }, [e?.id, tagsForExpense]);
 
   const itemsSum = useMemo(() => rowsTotal(rows), [rows]);
 
@@ -68,6 +91,8 @@ function EditExpense({ route, navigation }) {
           recurring,
           notes: notes.trim() || null,
           payment_method: paymentMethod,
+          tags: tagNames,
+          emi_loan_id: emiLoanId,
         }, items);
       } else {
         const amt = parseFloat(amount);
@@ -81,6 +106,8 @@ function EditExpense({ route, navigation }) {
           recurring,
           notes: notes.trim() || null,
           payment_method: paymentMethod,
+          tags: tagNames,
+          emi_loan_id: emiLoanId,
         });
         if (hadItems) {
           await replaceItems(e.id, [], date || e.expense_date);
@@ -140,6 +167,10 @@ function EditExpense({ route, navigation }) {
             const sel = categoryId === p.id;
             return (
               <TouchableOpacity key={p.id} onPress={() => setCategoryId(p.id)}
+                hitSlop={{ top: 8, bottom: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Category: ${p.label}`}
+                accessibilityState={{ selected: sel }}
                 style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
                   backgroundColor: sel ? F.coral : F.surface,
                   borderWidth: 1, borderColor: sel ? F.coral : F.line,
@@ -182,6 +213,57 @@ function EditExpense({ route, navigation }) {
         <Text style={{ color: F.ink, fontSize: 14, fontWeight: '500' }}>🔄 Recurring monthly</Text>
         <Text style={{ color: F.ink2, fontSize: 13 }}>{recurring ? 'Yes' : 'No'}</Text>
       </TouchableOpacity>
+
+      <TagChipSurface
+        F={F}
+        allTags={allTags}
+        tagNames={tagNames}
+        setTagNames={setTagNames}
+        showTagInput={showTagInput}
+        setShowTagInput={setShowTagInput}
+        pendingTagName={pendingTagName}
+        setPendingTagName={setPendingTagName}
+        getOrCreateTag={getOrCreateTag}
+        style={{ marginBottom: 14 }}
+      />
+
+      {/* 7.5 — EMI link. Only rendered when at least one loan exists.
+          Tap a chip to mark this expense as that loan's installment payment;
+          tap again to clear. emi_loan_id is a real FK column (v30). */}
+      {emiLoans.length > 0 && (
+        <View style={{ backgroundColor: F.surface, borderRadius: 14, padding: 14,
+          borderWidth: 1, borderColor: F.line, marginBottom: 14 }}>
+          <Text style={{ fontSize: 11, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 8 }}>
+            EMI PAYMENT
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingRight: 4 }}>
+            {emiLoans.map((loan) => {
+              const sel = emiLoanId === loan.id;
+              return (
+                <TouchableOpacity
+                  key={loan.id}
+                  onPress={() => setEmiLoanId(sel ? null : loan.id)}
+                  activeOpacity={0.75}
+                  hitSlop={{ top: 6, bottom: 6 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Link to EMI ${loan.name}`}
+                  accessibilityState={{ selected: sel }}
+                  style={{
+                    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 99,
+                    backgroundColor: sel ? F.coral : F.cream,
+                    borderWidth: 1, borderColor: sel ? F.coral : F.line,
+                  }}>
+                  <Text style={{ color: sel ? '#fff' : F.ink, fontSize: 12,
+                    fontWeight: sel ? '700' : '500' }}>
+                    {loan.icon || '🏦'} {loan.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       <Text style={{ fontSize: 11, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 6 }}>NOTES</Text>
       <TextInput value={notes} onChangeText={setNotes}

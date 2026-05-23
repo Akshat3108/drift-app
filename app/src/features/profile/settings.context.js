@@ -5,7 +5,15 @@ import { useRegisterRefresh } from '@core/state/RefreshBus';
 
 const SettingsContext = createContext(null);
 
-const DEFAULTS = { currency: 'INR', dark_mode: 0, carbon_tracking: 1 };
+const DEFAULTS = {
+  currency: 'INR',
+  dark_mode: 0,
+  carbon_tracking: 1,
+  orientation_seen: 0,
+  notifications_enabled: 0,
+  notif_budget_threshold: 0.8,
+  notif_sub_lead_days: 3,
+};
 
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULTS);

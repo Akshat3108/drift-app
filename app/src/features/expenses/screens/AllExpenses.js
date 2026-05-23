@@ -44,7 +44,13 @@ function AllExpenses({ navigation, route }) {
   // contains any active filter beyond the legacy category pill, we bypass
   // the in-memory ExpensesProvider feed and query SQL directly so the
   // FilterSheet axes (date, amount, mood, …) work without bloating context.
-  const [criteria, setCriteria] = useState({});
+  //
+  // 6.20 — route.params.criteria seeds the initial filter, used by
+  // MerchantDetail's tappable category breakdown rows to deep-link into a
+  // pre-filtered list (merchant + category). Normalised on entry so any
+  // empty arrays drop out.
+  const [criteria, setCriteria] = useState(() =>
+    normalizeCriteria(route.params?.criteria || {}));
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sqlRows, setSqlRows] = useState(null);   // null = not using SQL feed
   const [sqlLoading, setSqlLoading] = useState(false);
@@ -61,6 +67,9 @@ function AllExpenses({ navigation, route }) {
           <TouchableOpacity
             onPress={clearSelection}
             activeOpacity={0.7}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Exit selection mode"
             style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
             <Text style={{ fontSize: 16, color: F.coral, fontWeight: '700' }}>Done</Text>
           </TouchableOpacity>
@@ -73,6 +82,9 @@ function AllExpenses({ navigation, route }) {
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             activeOpacity={0.7}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Search transactions"
             style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
             <Text style={{ fontSize: 18 }}>🔍</Text>
           </TouchableOpacity>
@@ -436,8 +448,13 @@ function ActionBtn({ F, icon, label, destructive, onPress }) {
 }
 
 function FilterPill({ active, onPress, F, children }) {
+  // 2.D.20 — pill visual stays compact (paddingVertical: 8 ≈ 32px tall) but
+  // hitSlop expands the touch region to ~48px vertical, clearing WCAG 2.5.5.
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.75}
+      hitSlop={{ top: 8, bottom: 8 }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={{
         paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99,
         backgroundColor: active ? F.coral : F.cream,

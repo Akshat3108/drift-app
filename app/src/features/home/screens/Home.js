@@ -75,6 +75,8 @@ function Home({ navigation }) {
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Search"
             style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: F.cream,
               alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: F.line }}
           >
@@ -83,6 +85,8 @@ function Home({ navigation }) {
           <TouchableOpacity
             onPress={() => navigation.navigate('Profile')}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Profile"
             style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: F.cream,
               alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: F.line }}
           >
@@ -105,10 +109,26 @@ function Home({ navigation }) {
           {monthBudget > 0 ? 'left to spend this month' : 'no budgets set yet'}
         </Text>
 
+        {totalSpend > 0 && (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('SpendCalendar')}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="View spending calendar"
+            style={{ alignSelf: 'flex-start', marginTop: 8 }}>
+            <Text style={{ color: F.coral, fontSize: 12, fontWeight: '600' }}>
+              View calendar →
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
           <TouchableOpacity
             onPress={() => navigation.navigate('NetWorth')}
             activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={net ? `Net worth ${sym}${formatShort(net.net)}` : 'Set up net worth'}
             style={{ flex: 1, backgroundColor: F.surface, borderRadius: 14, padding: 14,
               borderWidth: 1, borderColor: F.line }}
           >
@@ -126,6 +146,8 @@ function Home({ navigation }) {
           <TouchableOpacity
             onPress={() => navigation.navigate('Travel')}
             activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={nextTrip ? `Travel: next trip to ${nextTrip.destination || nextTrip.name}` : 'Plan a trip'}
             style={{ flex: 1, backgroundColor: F.surface, borderRadius: 14, padding: 14,
               borderWidth: 1, borderColor: F.line }}
           >
@@ -186,6 +208,8 @@ function Home({ navigation }) {
                 key={p.id}
                 onPress={() => navigation.navigate('PotDetail', { potId: p.id, potName: `${p.emoji} ${p.label}` })}
                 activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel={`${p.label}: ${sym}${p.spend.toFixed(0)}${p.budget > 0 ? ` of ${sym}${p.budget}, ${Math.round((p.spend / p.budget) * 100)} percent used` : ''}`}
                 style={{
                   width: '47%',
                   backgroundColor: potBg(F, p.color),
@@ -210,8 +234,10 @@ function Home({ navigation }) {
                       value={p.spend} max={p.budget}
                       color={over ? F.coral : F.sageD} F={F} height={4}
                     />
+                    {/* 2.D.19 — glyph prefix is the non-color signal: ⚠ over,
+                        ✓ under. Removes the colorblind dependency on coral. */}
                     <Text style={{ fontSize: 10, color: over ? F.coral : F.ink3, marginTop: 4, textAlign: 'right' }}>
-                      {Math.round(pct * 100)}% used →
+                      {over ? '⚠ ' : '✓ '}{Math.round(pct * 100)}% used →
                     </Text>
                   </>
                 )}
@@ -243,6 +269,8 @@ function Home({ navigation }) {
         <TouchableOpacity
           onPress={() => navigation.navigate('Items', { filter: 'produce' })}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={`Price watch: ${topMover.display_name} ${topMover.change_pct > 0 ? 'up' : 'down'} ${Math.abs(topMover.change_pct).toFixed(0)} percent, now ${sym}${topMover.last_unit_price.toFixed(0)} per ${topMover.canonical_unit}`}
           style={{ backgroundColor: F.mint, borderRadius: 18, padding: 16,
             flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 }}
         >
@@ -281,6 +309,8 @@ function Home({ navigation }) {
                 key={r.id}
                 onPress={() => navigation.navigate('Detail', { id: r.id })}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${r.merchant}, ${sym}${r.amount.toFixed(2)}, ${r.category_name || 'uncategorised'}, ${r.expense_date}`}
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
                   borderTopWidth: i ? 1 : 0, borderTopColor: F.line,

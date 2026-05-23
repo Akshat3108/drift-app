@@ -3,6 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useItemActions } from '@features/items/context';
+import { cheapestMerchantPerItem } from '../../../analytics';
 
 function ItemTrend({ route, navigation }) {
   const { F, sym } = useApp();
@@ -17,6 +18,9 @@ function ItemTrend({ route, navigation }) {
   const [consumption, setConsumption] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [sameQty, setSameQty] = useState([]);
+  // 6.14 — cheapest-merchant data for this item. null until first load,
+  // [] when no merchants have ≥2 samples (the "Cheapest" pill stays hidden).
+  const [cheapest, setCheapest] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -37,6 +41,20 @@ function ItemTrend({ route, navigation }) {
   useEffect(() => {
     consumptionQuery(normalizedName, { bucket, range: 12 }).then(setConsumption);
   }, [normalizedName, bucket, consumptionQuery]);
+
+  // 6.14 — load cheapest-merchant comparison once per item. Filtered server-
+  // side by normalizedName so we don't bring back the full top-50 dataset.
+  useEffect(() => {
+    let cancelled = false;
+    cheapestMerchantPerItem({ normalizedName, limitItems: 1, topN: 5 })
+      .then((res) => {
+        if (cancelled) return;
+        const item = res?.items?.[0];
+        setCheapest(item?.merchants ?? []);
+      })
+      .catch(() => { if (!cancelled) setCheapest([]); });
+    return () => { cancelled = true; };
+  }, [normalizedName]);
 
   const last = history[history.length - 1];
   const first = history[0];
@@ -83,7 +101,14 @@ function ItemTrend({ route, navigation }) {
       </View>
 
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-        {[['price', 'Price'], ['consumption', 'Consumption']].map(([k, l]) => {
+        {/* 6.14 — the Cheapest pill is only included when ≥1 merchant has
+            ≥2 samples for this item (cheapestMerchantPerItem's HAVING gate).
+            Single-sample merchants are OCR noise, not real comparisons. */}
+        {[
+          ['price', 'Price', true],
+          ['consumption', 'Consumption', true],
+          ['cheapest', 'Cheapest', (cheapest?.length ?? 0) >= 1],
+        ].filter(([, , show]) => show).map(([k, l]) => {
           const sel = tab === k;
           return (
             <TouchableOpacity key={k} onPress={() => setTab(k)}
@@ -180,6 +205,10 @@ function ItemTrend({ route, navigation }) {
               const sel = bucket === k;
               return (
                 <TouchableOpacity key={k} onPress={() => setBucket(k)}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Consumption per ${l.toLowerCase()}`}
+                  accessibilityState={{ selected: sel }}
                   style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99,
                     backgroundColor: sel ? F.coral : F.surface,
                     borderWidth: 1, borderColor: sel ? F.coral : F.line }}>
@@ -226,6 +255,67 @@ function ItemTrend({ route, navigation }) {
             )}
           </View>
         </>
+      )}
+
+      {tab === 'cheapest' && cheapest && (
+        <View style={{ backgroundColor: F.surface, borderRadius: 20, padding: 18,
+          borderWidth: 1, borderColor: F.line, marginBottom: 16 }}>
+          <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 12 }}>
+            Where you've found {displayName} cheapest (≥2 visits each)
+          </Text>
+          {cheapest.length === 0 ? (
+            <Text style={{ textAlign: 'center', color: F.ink3, padding: 20 }}>
+              Buy from another merchant to compare prices.
+            </Text>
+          ) : cheapest.map((m, i) => {
+            const isBest = i === 0;
+            const delta = isBest ? 0 : m.avg_unit_price - cheapest[0].avg_unit_price;
+            return (
+              <View key={`${m.merchant || 'unknown'}-${i}`}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                  padding: 12, borderRadius: 12, marginBottom: 8,
+                  backgroundColor: isBest ? F.cream : 'transparent',
+                  borderWidth: 1, borderColor: isBest ? F.cream : F.line,
+                }}>
+                {isBest && (
+                  <View style={{ backgroundColor: F.sageD, borderRadius: 99,
+                    paddingHorizontal: 7, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>BEST</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, color: F.ink, fontWeight: '500' }}>
+                    {m.merchant || 'Unknown store'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: F.ink3 }}>
+                    {m.samples} visit{m.samples === 1 ? '' : 's'}
+                    {m.last_seen ? ` · last ${m.last_seen}` : ''}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 15, color: isBest ? F.sageD : F.ink, fontWeight: '600' }}>
+                    {sym}{Number(m.avg_unit_price).toFixed(2)}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: F.ink3 }}>per {canonicalUnit}</Text>
+                  {!isBest && delta > 0 && (
+                    <Text style={{ fontSize: 10, color: F.coral, fontWeight: '600' }}>
+                      +{sym}{delta.toFixed(2)} vs best
+                    </Text>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+          {cheapest.length >= 2 && (
+            <Text style={{ fontSize: 11, color: F.ink3, marginTop: 4, textAlign: 'center' }}>
+              Switching to the best merchant saves about{' '}
+              <Text style={{ color: F.sageD, fontWeight: '700' }}>
+                {sym}{(cheapest[cheapest.length - 1].avg_unit_price - cheapest[0].avg_unit_price).toFixed(2)}
+              </Text>{' '}per {canonicalUnit}.
+            </Text>
+          )}
+        </View>
       )}
 
       {sameQty.length > 1 && last && (

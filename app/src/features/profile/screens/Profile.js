@@ -6,6 +6,7 @@ import { useProfile } from '../context';
 import { Toggle } from '@components/primitives/Toggle';
 import { CURRENCIES } from '@core/domain/currencies';
 import { AVATAR_CHOICES } from '@core/domain/avatars';
+import { useNotifications } from '@features/notifications/context';
 import {
   bundleForExport,
   clearCandidates,
@@ -38,6 +39,7 @@ function Profile({ navigation }) {
   const { F, sym, profile, subs, goals, expenses, settings, monthBudget, totalSpend,
     setSetting, updateProfile, resetApp } = useApp();
   const { recentSearches, clearRecentSearches } = useProfile();
+  const notifications = useNotifications();
   const insets = useSafeAreaInsets();
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(profile?.name || '');
@@ -123,6 +125,34 @@ function Profile({ navigation }) {
     setEditingName(false);
   };
 
+  const notifEnabled = !!settings.notifications_enabled;
+  const notifThreshold = Number.isFinite(settings.notif_budget_threshold)
+    ? settings.notif_budget_threshold
+    : 0.8;
+  const notifLead = Number.isInteger(settings.notif_sub_lead_days)
+    ? settings.notif_sub_lead_days
+    : 3;
+  const thresholdBands = [0.7, 0.8, 0.9, 1.0];
+  const leadChoices = [0, 1, 3, 7];
+
+  const handleToggleNotifications = async (v) => {
+    if (!notifications) return;
+    if (v && !notifications.available) {
+      Alert.alert(
+        'Notifications not available',
+        'Rebuild the app (npm run android) to enable notifications.'
+      );
+      return;
+    }
+    const res = await notifications.toggleEnabled(v, setSetting);
+    if (v && !res.granted) {
+      Alert.alert(
+        'Permission denied',
+        'Enable notifications for Drift in your device settings, then toggle this on again.'
+      );
+    }
+  };
+
   const handleClearSearches = () => {
     Alert.alert('Clear search history?',
       `Removes ${recentSearches.length} recent search${recentSearches.length === 1 ? '' : 'es'} from this device. Your saved expenses are not affected.`,
@@ -170,6 +200,10 @@ function Profile({ navigation }) {
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {Object.keys(CURRENCIES).map(k => (
                 <TouchableOpacity key={k} onPress={() => setSetting('currency', k)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Currency ${k}`}
+                  accessibilityState={{ selected: settings.currency === k }}
                   style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
                     backgroundColor: settings.currency === k ? F.coral : F.cream }}>
                   <Text style={{ color: settings.currency === k ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>
@@ -183,6 +217,66 @@ function Profile({ navigation }) {
           right={<Toggle value={!!settings.dark_mode} onChange={v => setSetting('dark_mode', v ? 1 : 0)} F={F}/>}/>
         <Row icon="🌱" label="Carbon tracking" sub="CO₂ estimate per expense" F={F}
           right={<Toggle value={!!settings.carbon_tracking} onChange={v => setSetting('carbon_tracking', v ? 1 : 0)} F={F}/>}/>
+      </View>
+
+      <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
+        textTransform: 'uppercase', marginBottom: 8 }}>Notifications</Text>
+      <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
+        borderColor: F.line, overflow: 'hidden', marginBottom: 20 }}>
+        <Row icon="🔔" label="Enable notifications"
+          sub={notifEnabled
+            ? (notifications?.unreadCount ? `${notifications.unreadCount} unread` : 'On')
+            : 'Budget alerts and sub-due reminders'}
+          F={F}
+          right={<Toggle value={notifEnabled} onChange={handleToggleNotifications} F={F}/>}/>
+        {notifEnabled && (
+          <>
+            <Row icon="📊" label="Budget alert at" sub="Fires once per category per month" F={F}
+              right={
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {thresholdBands.map(b => {
+                    const sel = Math.abs(notifThreshold - b) < 0.01;
+                    return (
+                      <TouchableOpacity key={b} onPress={() => setSetting('notif_budget_threshold', b)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Budget threshold ${Math.round(b * 100)} percent`}
+                        accessibilityState={{ selected: sel }}
+                        style={{ paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8,
+                          backgroundColor: sel ? F.coral : F.cream }}>
+                        <Text style={{ color: sel ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>
+                          {Math.round(b * 100)}%
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              }/>
+            <Row icon="⏰" label="Remind subs"
+              sub={notifLead === 0 ? 'Reminders disabled' : `${notifLead} day${notifLead === 1 ? '' : 's'} before due`}
+              F={F}
+              right={
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {leadChoices.map(d => {
+                    const sel = notifLead === d;
+                    return (
+                      <TouchableOpacity key={d} onPress={() => setSetting('notif_sub_lead_days', d)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={d === 0 ? 'Sub reminders off' : `${d} day lead`}
+                        accessibilityState={{ selected: sel }}
+                        style={{ paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8,
+                          backgroundColor: sel ? F.coral : F.cream }}>
+                        <Text style={{ color: sel ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>
+                          {d === 0 ? 'Off' : `${d}d`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              }/>
+          </>
+        )}
       </View>
 
       <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
@@ -243,6 +337,18 @@ function Profile({ navigation }) {
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         <Row icon="🗂️" label="Manage categories" F={F}
           onPress={() => navigation.navigate('EditPot')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🏷️" label="Manage tags" sub="Rename, merge, or delete" F={F}
+          onPress={() => navigation.navigate('ManageTags')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🏦" label="Manage EMIs" sub="Track loans with amortization" F={F}
+          onPress={() => navigation.navigate('EMI')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="⛽" label="Manage vehicles" sub="Cars, bikes, and fuel history" F={F}
+          onPress={() => navigation.navigate('Vehicles')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🥗" label="Manage pantry" sub="Track what you own and what's running low" F={F}
+          onPress={() => navigation.navigate('Pantry')}
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         {recentSearches.length > 0 && (
           <Row icon="🕘" label="Clear search history" sub={`${recentSearches.length} recent search${recentSearches.length === 1 ? '' : 'es'}`} F={F}

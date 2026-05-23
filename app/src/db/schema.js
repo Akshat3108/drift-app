@@ -765,6 +765,249 @@ ALTER TABLE trips ADD COLUMN deleted_at TEXT;
 CREATE INDEX IF NOT EXISTS idx_trips_alive ON trips(id) WHERE deleted_at IS NULL;
 `;
 
+// v26 — Day-0 orientation flag on settings (2.D.15). One-shot boolean: 0 until
+// the user finishes (or skips) the orientation screen, then 1 forever. Default
+// 0 so existing rows correctly trigger orientation on the *next* launch after
+// the upgrade — a one-time visual nag is acceptable; persistent suppression
+// requires the column to exist first.
+const V26_SQL = `
+ALTER TABLE settings ADD COLUMN orientation_seen INTEGER NOT NULL DEFAULT 0;
+`;
+
+// v27 — analytics_cache (6.1). Lazy materialisation store for Phase 3 analytics
+// functions. Each row is one cached compute result, keyed by a deterministic
+// string the caller chooses (e.g. `spend:velocity:2026-05-20` or `items:
+// inflation:v1`). TTL is rendered as an absolute `expires_at` (ISO) so eviction
+// is a pure comparison — no clock-arithmetic at read time. `scope` is a coarse
+// tag (one of: 'spend','items','subscriptions','forecast','seasonal',
+// 'lifestyle','anomaly','patterns') so a future invalidate(scope[]) can wipe
+// related entries without enumerating keys. created_at is bookkeeping for
+// future TTL-tuning telemetry — not read by getCached().
+// Index covers the only non-PK access pattern (evict-by-scope-or-expired).
+// Not added to V1_REQUIRED_TABLES — that constant is frozen at v1's tables.
+const V27_SQL = `
+CREATE TABLE IF NOT EXISTS analytics_cache (
+  key        TEXT PRIMARY KEY,
+  scope      TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ac_scope_expires
+  ON analytics_cache(scope, expires_at);
+`;
+
+// v30 — Phase 4 / 7.5 EMI tracking.
+// `emi_loans` carries the loan terms (principal, rate, tenure, start_date).
+// The amortization schedule is derived in JS — no per-installment storage —
+// so a re-run of `buildSchedule()` is the source of truth at any time.
+// `emi_override` lets the user pin their bank's actual EMI when reducing-
+// balance rounding drifts (risk register line 842). `bill_day` capped at 28
+// to dodge Feb-30 edge cases. Soft-delete via deleted_at + partial index on
+// live rows for the listLive() query.
+//
+// `expenses.emi_loan_id` is added with ON DELETE SET NULL so removing the
+// loan doesn't orphan-delete the payment expenses (same convention as
+// category_id / account_id / trip_id). Partial index covers the per-loan
+// `linkedExpenses(loanId)` lookup without paying the index cost on
+// non-EMI rows (most expenses).
+const V30_SQL = `
+CREATE TABLE IF NOT EXISTS emi_loans (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  name              TEXT NOT NULL,
+  lender            TEXT,
+  principal         REAL NOT NULL,
+  annual_rate_pct   REAL NOT NULL,
+  tenure_months     INTEGER NOT NULL,
+  start_date        TEXT NOT NULL,
+  installments_paid INTEGER NOT NULL DEFAULT 0,
+  emi_override      REAL,
+  bill_day          INTEGER NOT NULL DEFAULT 1
+                       CHECK (bill_day BETWEEN 1 AND 28),
+  notes             TEXT,
+  icon              TEXT NOT NULL DEFAULT '🏦',
+  color             TEXT NOT NULL DEFAULT '#888',
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_emi_loans_live
+  ON emi_loans(created_at DESC) WHERE deleted_at IS NULL;
+
+ALTER TABLE expenses
+  ADD COLUMN emi_loan_id INTEGER
+    REFERENCES emi_loans(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_expenses_emi
+  ON expenses(emi_loan_id) WHERE emi_loan_id IS NOT NULL;
+`;
+
+// v31 — Phase 4 / 7.6 Fuel & vehicle tracking.
+// `vehicles` holds the user's tracked vehicles (car/bike/scooter/other), each
+// with a default fuel_type the picker pre-selects. `fuel_fillups` is a child
+// of both `vehicles` (CASCADE on delete — wiping a vehicle wipes its fuel
+// history) and `expenses` (UNIQUE + CASCADE — one fill-up rides on one
+// expense; deleting the expense wipes the fill-up). The UNIQUE on expense_id
+// enforces the 1-to-1 model decided at plan time: a fuel receipt produces
+// exactly one fill-up row, edits go through that pair atomically.
+//
+// `amount` on fuel_fillups is denormalised — equal to expenses.amount but
+// stored locally so the per-vehicle this-month-spend hero card avoids a JOIN
+// to expenses for what is otherwise a cheap scan. The application writes
+// both rows inside the same transaction so they cannot drift.
+//
+// fuel_type on the fill-up is NULL by convention "use vehicle default";
+// non-null overrides per-fill-up (covers Petrol/CNG bi-fuel cars). CHECK on
+// both columns mirrors the OCR detector's enum + Electric.
+//
+// bill_day-style edge cases don't apply here — fill_date is captured from
+// the receipt or the picker as a YYYY-MM-DD string.
+const V31_SQL = `
+CREATE TABLE IF NOT EXISTS vehicles (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  name                TEXT NOT NULL,
+  type                TEXT NOT NULL DEFAULT 'car'
+                       CHECK (type IN ('car','bike','scooter','other')),
+  fuel_type           TEXT NOT NULL DEFAULT 'Petrol'
+                       CHECK (fuel_type IN ('Petrol','Diesel','CNG','Electric')),
+  registration_number TEXT,
+  notes               TEXT,
+  icon                TEXT NOT NULL DEFAULT '🚗',
+  color               TEXT NOT NULL DEFAULT '#888',
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vehicles_live
+  ON vehicles(created_at DESC) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS fuel_fillups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id    INTEGER NOT NULL
+                  REFERENCES vehicles(id) ON DELETE CASCADE,
+  expense_id    INTEGER NOT NULL UNIQUE
+                  REFERENCES expenses(id) ON DELETE CASCADE,
+  fill_date     TEXT NOT NULL,
+  liters        REAL NOT NULL,
+  rate_per_l    REAL,
+  amount        REAL NOT NULL,
+  odometer_km   REAL,
+  is_full_tank  INTEGER NOT NULL DEFAULT 1 CHECK (is_full_tank IN (0,1)),
+  fuel_type     TEXT CHECK (fuel_type IS NULL OR
+                            fuel_type IN ('Petrol','Diesel','CNG','Electric')),
+  notes         TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fillups_vehicle_date
+  ON fuel_fillups(vehicle_id, fill_date DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_fillups_expense
+  ON fuel_fillups(expense_id);
+`;
+
+// v32 — Phase 4 / 7.7 Pantry inventory.
+// `pantry_items` is a thin user-owned inventory table keyed by `normalized_name`
+// (the same canonical key receipt_items and item_summary already use). Each
+// row tracks what the user owns of a single canonical item, in the
+// `canonical_unit` already established by item_summary (g/ml/pcs/kg/L).
+//
+// Auto-populate happens JS-side from `expRepo.createWithItems`: a scanned
+// receipt item with `points_count >= 2` (i.e. the second purchase of this
+// item) either increments the matching live pantry row's current_qty or
+// creates a new one. Single-shot purchases don't pollute. Users can also
+// add rows manually from the Pantry screen.
+//
+// `reorder_threshold` and `target_qty` are NULL by default — the low-stock
+// checker SKIPS rows with NULL threshold (no false fires until the user
+// opts in explicitly via EditPantryItem). The partial `idx_pantry_low_stock`
+// covers exactly the shopping-list/notification query path.
+//
+// UNIQUE partial index on `normalized_name WHERE deleted_at IS NULL` enforces
+// "one live pantry entry per canonical item" while leaving soft-deleted
+// rows intact as history — a re-scan after soft-delete creates a fresh row.
+const V32_SQL = `
+CREATE TABLE IF NOT EXISTS pantry_items (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  normalized_name   TEXT NOT NULL,
+  display_name      TEXT NOT NULL,
+  kind              TEXT NOT NULL DEFAULT 'other',
+  canonical_unit    TEXT NOT NULL DEFAULT 'pcs',
+  current_qty       REAL NOT NULL DEFAULT 0,
+  reorder_threshold REAL,
+  target_qty        REAL,
+  last_topped_up_at TEXT,
+  notes             TEXT,
+  icon              TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at        TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pantry_normalized_name_live
+  ON pantry_items(normalized_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pantry_low_stock
+  ON pantry_items(current_qty)
+  WHERE deleted_at IS NULL AND reorder_threshold IS NOT NULL;
+`;
+
+// v29 — Phase 4 / 7.3 tags.
+// `tags` is a small user-owned reference table with case-insensitive
+// uniqueness (NOCASE collation + partial UNIQUE WHERE deleted_at IS NULL),
+// so soft-deleting a tag frees the name for re-use. `expense_tags` is the
+// M:N join with composite-PK + FK CASCADE both ways so a hard-deleted
+// expense (which only happens on resetAll today) carries its joins with
+// it. The `idx_expense_tags_tag` index covers the reverse-direction filter
+// subquery used by buildWhere() for `WHERE tag_id IN (?)`.
+const V29_SQL = `
+CREATE TABLE IF NOT EXISTS tags (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL COLLATE NOCASE,
+  color       TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_live
+  ON tags(name COLLATE NOCASE) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS expense_tags (
+  expense_id  INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  tag_id      INTEGER NOT NULL REFERENCES tags(id)     ON DELETE CASCADE,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (expense_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_expense_tags_tag
+  ON expense_tags(tag_id);
+`;
+
+// v28 — Phase 4 / 7.1 notifications.
+// notification_log is a local-only audit + dedupe surface for every notification
+// Drift fires. payload_json holds kind-specific context ({category_id, sub_id,
+// item_normalized_name, …}) so new kinds can land without re-shaping the table.
+// dedupe_key (UNIQUE when non-null) prevents the budget-threshold checker from
+// firing twice for the same (month_key, category_id, band) and lets the sub-due
+// scheduler replace pending rows when next_bill changes. Settings columns are
+// the three knobs that gate the checkers; notifications_enabled defaults to 0
+// so this migration is a no-op on existing installs until the user opts in.
+const V28_SQL = `
+CREATE TABLE IF NOT EXISTS notification_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind          TEXT NOT NULL CHECK (kind IN ('budget_threshold','sub_due','price_alert','other')),
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  payload_json  TEXT,
+  scheduled_for TEXT,
+  delivered_at  TEXT,
+  read_at       TEXT,
+  dedupe_key    TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_dedupe
+  ON notification_log(dedupe_key) WHERE dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notif_kind_created
+  ON notification_log(kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notif_unread
+  ON notification_log(created_at DESC) WHERE read_at IS NULL;
+
+ALTER TABLE settings ADD COLUMN notifications_enabled  INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE settings ADD COLUMN notif_budget_threshold REAL    NOT NULL DEFAULT 0.8;
+ALTER TABLE settings ADD COLUMN notif_sub_lead_days    INTEGER NOT NULL DEFAULT 3;
+`;
+
 const V24_SQL = `
 CREATE TABLE IF NOT EXISTS merchant_aliases (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -939,6 +1182,41 @@ export const migrations = [
     name: 'trips-soft-delete',
     up: async (db) => { await db.execAsync(V25_SQL); },
   },
+  {
+    version: 26,
+    name: 'settings-orientation-seen',
+    up: async (db) => { await db.execAsync(V26_SQL); },
+  },
+  {
+    version: 27,
+    name: 'analytics-cache',
+    up: async (db) => { await db.execAsync(V27_SQL); },
+  },
+  {
+    version: 28,
+    name: 'notification-log',
+    up: async (db) => { await db.execAsync(V28_SQL); },
+  },
+  {
+    version: 29,
+    name: 'tags',
+    up: async (db) => { await db.execAsync(V29_SQL); },
+  },
+  {
+    version: 30,
+    name: 'emi-loans',
+    up: async (db) => { await db.execAsync(V30_SQL); },
+  },
+  {
+    version: 31,
+    name: 'vehicles-and-fuel-fillups',
+    up: async (db) => { await db.execAsync(V31_SQL); },
+  },
+  {
+    version: 32,
+    name: 'pantry-items',
+    up: async (db) => { await db.execAsync(V32_SQL); },
+  },
 ];
 
 // Tables present after v1 — used by the legacy-stamp detection in runMigrations()
@@ -951,8 +1229,19 @@ export const TABLES = [
   // FTS5 virtual tables are not listed here: their AD triggers handle eviction.
   'monthly_summary', 'item_summary',
   'account_transactions', 'goal_contributions',
+  // 7.6 — fuel_fillups is a child of BOTH expenses (FK CASCADE) and vehicles
+  // (FK CASCADE). Children-first wipe order requires fuel_fillups before
+  // both parents.
+  'fuel_fillups',
   'receipt_items', 'expenses', 'income', 'categories',
   'subscriptions', 'goals',
+  // 7.5 — emi_loans is a parent of expenses (expenses.emi_loan_id → emi_loans.id
+  // ON DELETE SET NULL). Wiped after expenses so the FK SET NULL trigger is a no-op
+  // (expenses already gone). Soft-delete-aware listLive() uses idx_emi_loans_live.
+  'emi_loans',
+  // 7.6 — vehicles is the parent of fuel_fillups. Wiped after fuel_fillups
+  // (already drained above) so the CASCADE trigger is a no-op.
+  'vehicles',
   // 4.22 — receipt_templates is a child of merchants (FK ON DELETE CASCADE),
   // so it must be wiped BEFORE merchants in the resetAll() ordering.
   'receipt_templates',
@@ -965,6 +1254,20 @@ export const TABLES = [
   // 5.3 — saved_filters has no FK; ordering only matters for human readability.
   // Place it next to the other user-facing customisation tables.
   'saved_filters',
+  // 6.1 — analytics_cache has no FKs; safe anywhere. Place near other cache-
+  // like / customisation tables so resetAll() wipes it alongside saved_filters.
+  'analytics_cache',
+  // 7.1 — notification_log has no FKs; payload_json carries the soft references
+  // (category_id / sub_id / item key). Wiped on resetAll() so a factory reset
+  // also clears the audit history.
+  'notification_log',
+  // 7.3 — expense_tags is a child of both expenses (already wiped above) and
+  // tags. Children-first wipe order requires expense_tags before tags.
+  'expense_tags', 'tags',
+  // 7.7 — pantry_items has no FK (it joins to receipt_items by normalized_name,
+  // not by id). Ordering is purely organisational; place next to the other
+  // user-customisation tables.
+  'pantry_items',
   'accounts', 'settings', 'profile',
 ];
 

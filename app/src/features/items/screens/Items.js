@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../../../hooks/useAppState';
@@ -15,6 +15,7 @@ function Items({ navigation, route }) {
   const [filter, setFilter] = useState(route.params?.filter || 'all');
   const [rows, setRows]     = useState([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery]   = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -28,8 +29,52 @@ function Items({ navigation, route }) {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // 2.D.14 — client-side filter. `trackedItems` already loaded everything for
+  // the kind tab; doing the contains-check here keeps keystroke latency at
+  // O(N) over an in-memory array (always < 5ms in practice) instead of round-
+  // tripping to SQL. Case-insensitive over display_name; normalized_name would
+  // collapse stales like "Doodh" / "Milk" but display_name is what the user
+  // sees, so match that for principle of least surprise.
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(r => r.display_name.toLowerCase().includes(q));
+  }, [rows, query]);
+
   return (
     <View style={{ flex: 1, backgroundColor: F.bg }}>
+      {/* 2.D.14 — search bar above the kind tabs. Surface card matches the
+          rest of the chrome; the ✕ clear button only renders when typed in. */}
+      <View style={{ backgroundColor: F.surface, paddingHorizontal: 16, paddingTop: 12,
+        paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+          backgroundColor: F.cream, borderRadius: 14, paddingHorizontal: 12,
+          borderWidth: 1, borderColor: F.line }}>
+          <Text style={{ fontSize: 14 }} accessibilityElementsHidden>🔍</Text>
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search items"
+            placeholderTextColor={F.ink3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search tracked items"
+            style={{ flex: 1, paddingVertical: 10, fontSize: 14, color: F.ink }}
+          />
+          {query.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setQuery('')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              style={{ padding: 4 }}>
+              <Text style={{ fontSize: 14, color: F.ink2 }}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={{ flexGrow: 0, backgroundColor: F.surface, borderBottomWidth: 1, borderBottomColor: F.line }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}>
@@ -37,6 +82,10 @@ function Items({ navigation, route }) {
           const sel = filter === k;
           return (
             <TouchableOpacity key={k} onPress={() => setFilter(k)}
+              hitSlop={{ top: 8, bottom: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Filter ${l}`}
+              accessibilityState={{ selected: sel }}
               style={{
                 paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99,
                 backgroundColor: sel ? F.coral : F.cream,
@@ -54,22 +103,28 @@ function Items({ navigation, route }) {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={F.coral}/>}
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}>
 
-        {rows.length === 0 && !loading && (
+        {visible.length === 0 && !loading && (
           <View style={{ alignItems: 'center', padding: 40, backgroundColor: F.surface,
             borderRadius: 20, borderWidth: 1, borderColor: F.line }}>
-            <Text style={{ fontSize: 40, marginBottom: 8 }}>📈</Text>
-            <Text style={{ fontSize: 15, color: F.ink, fontWeight: '500' }}>Nothing tracked yet</Text>
+            <Text style={{ fontSize: 40, marginBottom: 8 }}>{query.trim() ? '🔎' : '📈'}</Text>
+            <Text style={{ fontSize: 15, color: F.ink, fontWeight: '500' }}>
+              {query.trim() ? 'No matches' : 'Nothing tracked yet'}
+            </Text>
             <Text style={{ fontSize: 13, color: F.ink3, marginTop: 4, textAlign: 'center' }}>
-              Scan a receipt to start tracking item prices and consumption.
+              {query.trim()
+                ? `Nothing here matches "${query.trim()}".`
+                : 'Scan a receipt to start tracking item prices and consumption.'}
             </Text>
           </View>
         )}
 
-        {rows.map((r) => (
+        {visible.map((r) => (
           <TouchableOpacity
             key={r.normalized_name}
             onPress={() => navigation.navigate('ItemTrend', { normalizedName: r.normalized_name, displayName: r.display_name })}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`${r.display_name}, ${sym}${r.last_unit_price.toFixed(2)} per ${r.canonical_unit}${r.change_pct !== null ? `, ${r.change_pct > 0 ? 'up' : 'down'} ${Math.abs(r.change_pct).toFixed(0)} percent` : ''}`}
             style={{ backgroundColor: F.surface, borderRadius: 18, padding: 16,
               borderWidth: 1, borderColor: F.line, marginBottom: 10 }}
           >

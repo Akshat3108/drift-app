@@ -25,6 +25,7 @@ export const CRITERIA_KEYS = [
   'moods',               // string[]                    — e.mood IN (?, ...)
   'paymentMethods',      // string[]                    — e.payment_method IN (?, ...)
   'ids',                 // number[]                    — e.id IN (?, ...) — 5.8 batch ops + 5.7 export
+  'tagIds',              // number[]                    — 7.3 OR semantics via expense_tags subquery
 ];
 
 // Date-range presets resolve to absolute YYYY-MM-DD pairs. Computed against a
@@ -166,6 +167,15 @@ export function buildWhere(rawCriteria, { tableAlias = 'e' } = {}) {
     frags.push(`${E}.id IN (${inPlaceholders(c.ids.length)})`);
     params.push(...c.ids);
   }
+  // 7.3 — OR semantics: match if the expense has *any* of the selected tags.
+  // M:N can't sit on the expenses row, so this is a subquery against the
+  // expense_tags join. idx_expense_tags_tag covers `WHERE tag_id IN (?)`.
+  if (c.tagIds && c.tagIds.length) {
+    frags.push(
+      `${E}.id IN (SELECT expense_id FROM expense_tags WHERE tag_id IN (${inPlaceholders(c.tagIds.length)}))`
+    );
+    params.push(...c.tagIds);
+  }
 
   return { whereSql: frags.join(' AND '), params };
 }
@@ -189,6 +199,7 @@ export function hasActiveFilters(rawCriteria) {
   if (c.moods && c.moods.length) return true;
   if (c.paymentMethods && c.paymentMethods.length) return true;
   if (c.ids && c.ids.length) return true;
+  if (c.tagIds && c.tagIds.length) return true;
   if (c.amountRange && (Number.isFinite(c.amountRange.min) || Number.isFinite(c.amountRange.max))) return true;
   if (c.recurring === true || c.recurring === false) return true;
   if (c.hasReceipt === true || c.hasReceipt === false) return true;
@@ -201,7 +212,7 @@ export function hasActiveFilters(rawCriteria) {
 }
 
 // Human-readable summary for saved-filter pills. Keeps it short ("Groceries · Last 30 days").
-export function criteriaToHumanLabel(rawCriteria, { categoryMap = {}, merchantMap = {} } = {}) {
+export function criteriaToHumanLabel(rawCriteria, { categoryMap = {}, merchantMap = {}, tagMap = {} } = {}) {
   const c = normalizeCriteria(rawCriteria);
   const parts = [];
   if (c.categoryIds && c.categoryIds.length) {
@@ -244,6 +255,11 @@ export function criteriaToHumanLabel(rawCriteria, { categoryMap = {}, merchantMa
   }
   if (c.ids && c.ids.length) {
     parts.push(`${c.ids.length} selected`);
+  }
+  if (c.tagIds && c.tagIds.length) {
+    const names = c.tagIds.map((id) => tagMap[id]?.name).filter(Boolean);
+    if (names.length === 1) parts.push(`#${names[0]}`);
+    else if (names.length > 1) parts.push(`${names.length} tags`);
   }
   return parts.join(' · ') || 'All transactions';
 }

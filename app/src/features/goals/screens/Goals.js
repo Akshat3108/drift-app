@@ -96,6 +96,8 @@ function Goals({ navigation }) {
               onPress={() => { setContribFor(g); setContribAmt(''); }}
               onLongPress={() => handleLongPress(g)}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`${g.name}: ${Math.round(pct * 100)} percent saved, ${sym}${g.saved_amount.toLocaleString()} of ${sym}${g.target_amount.toLocaleString()}. Double tap to contribute, long-press for more.`}
               style={{ backgroundColor: bgs[i % 4], borderRadius: 22, padding: 18, marginBottom: 12 }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between',
@@ -136,6 +138,8 @@ function Goals({ navigation }) {
       <TouchableOpacity
         onPress={() => navigation.navigate('EditGoal')}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Add a new goal"
         style={{
           position: 'absolute', right: 22, bottom: insets.bottom + 22,
           width: 56, height: 56, borderRadius: 28, backgroundColor: F.coral,

@@ -8,7 +8,10 @@ import ItemRows, { emptyRow, toPersistedItems, rowsTotal } from '@components/Ite
 import { merchants as merchantRepo } from '@features/expenses/merchants.repo';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { aliases } from '@features/expenses/aliases.repo';
+import { useTags } from '@features/tags/context';
+import TagChipSurface from '@features/tags/components/TagChipSurface';
 import { logError } from '@core/utils/log';
+import { useToast } from '@components/Toast';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
 const MOODS = ['😍', '😌', '😐', '😬', '😞'];
@@ -35,6 +38,7 @@ export function formatChipDate(iso) {
 function Add({ navigation }) {
   const { F, sym, pots, expenses, addExpense, addExpenseWithItems, addIncome, settings } = useApp();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
 
   // 5.5 — top-level Expense | Income toggle. Income mode bypasses
   // pots/mood/recurring/items/payment and writes to the income table instead.
@@ -71,6 +75,11 @@ function Add({ navigation }) {
   const [recurring, setRecurring] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [rows, setRows]         = useState([emptyRow({ unit: 'kg' })]);
+  // 7.3 — per-entry tag selection (list of tag names). Cleared on save.
+  const { tags: allTags, getOrCreateTag } = useTags();
+  const [tagNames, setTagNames] = useState([]);
+  const [showTagInput, setShowTagInput] = useState(false);
+  const [pendingTagName, setPendingTagName] = useState('');
 
   // 5.9 — autocomplete + 5.10 — silent auto-cat.
   // `pickedMerchantId` is the merchants.id when the user tapped a dropdown
@@ -229,6 +238,12 @@ function Add({ navigation }) {
       return Alert.alert(kind === 'income' ? 'Enter a source' : 'Enter a merchant name');
     }
 
+    // 2.D.16 — snapshot whether this is the user's first-ever expense before
+    // the save (after the optimistic patch lands, expenses.length will be 1
+    // and we'd miss the gate). Income doesn't qualify — celebration is
+    // specifically for the first spend.
+    const isFirstEver = kind === 'expense' && expenses.length === 0;
+
     if (kind === 'income') {
       if (parseFloat(amount) === 0) return Alert.alert('Enter an amount');
       setSaving(true);
@@ -260,6 +275,7 @@ function Add({ navigation }) {
           carbon: settings.carbon_tracking ? 0.4 : 0,
           recurring,
           payment_method: paymentMethod,
+          tags: tagNames,
         });
         // 5.10 — every successful save reinforces the alias mapping so the
         // user's most recent choice wins the next time this merchant comes up.
@@ -269,6 +285,7 @@ function Add({ navigation }) {
           merchantId: mid,
           categoryId: selected.id,
         }).catch((err) => logError('add:alias-record', err));
+        if (isFirstEver) toast('🎉 First spend logged — welcome to Drift', { durationMs: 4500 });
         navigation.goBack();
       } catch (err) {
         Alert.alert('Could not save', err.message || String(err));
@@ -291,6 +308,7 @@ function Add({ navigation }) {
           carbon: settings.carbon_tracking ? 0.4 : 0,
           recurring,
           payment_method: paymentMethod,
+          tags: tagNames,
         },
         items,
       });
@@ -300,6 +318,7 @@ function Add({ navigation }) {
         merchantId: mid,
         categoryId: selected.id,
       }).catch((err) => logError('add:alias-record', err));
+      if (isFirstEver) toast('🎉 First spend logged — welcome to Drift', { durationMs: 4500 });
       navigation.goBack();
     } catch (err) {
       Alert.alert('Could not save', err.message || String(err));
@@ -334,7 +353,8 @@ function Add({ navigation }) {
       <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 12,
         flexDirection: 'row', alignItems: 'center', backgroundColor: F.surface,
         borderBottomWidth: 1, borderBottomColor: F.line }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}
+          accessibilityRole="button" accessibilityLabel="Cancel and close">
           <Text style={{ color: F.ink2, fontSize: 16 }}>Cancel</Text>
         </TouchableOpacity>
         <Text style={{ flex: 1, textAlign: 'center', fontSize: 18, color: F.ink, fontWeight: '400' }}>
@@ -352,6 +372,9 @@ function Add({ navigation }) {
           const sel = kind === k;
           return (
             <TouchableOpacity key={k} onPress={() => setKind(k)}
+              accessibilityRole="button"
+              accessibilityLabel={`Switch to ${l} mode`}
+              accessibilityState={{ selected: sel }}
               style={{
                 flex: 1, paddingVertical: 9, borderRadius: 99,
                 backgroundColor: sel ? (k === 'income' ? F.sageD : F.ink) : F.cream,
@@ -370,6 +393,9 @@ function Add({ navigation }) {
             const sel = mode === k;
             return (
               <TouchableOpacity key={k} onPress={() => setMode(k)}
+                accessibilityRole="button"
+                accessibilityLabel={`Switch to ${l} mode`}
+                accessibilityState={{ selected: sel }}
                 style={{
                   flex: 1, paddingVertical: 9, borderRadius: 99,
                   backgroundColor: sel ? F.ink : F.cream,
@@ -500,7 +526,7 @@ function Add({ navigation }) {
                 F={F}/>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
               {settings.carbon_tracking ? (
                 <View style={{ flex: 1, backgroundColor: F.mint, borderRadius: 18, padding: 14 }}>
                   <Text style={{ fontSize: 11, color: F.ink2 }}>🌱 Carbon</Text>
@@ -517,6 +543,19 @@ function Add({ navigation }) {
                 <Text style={{ fontSize: 10, color: F.ink3 }}>tap to toggle</Text>
               </TouchableOpacity>
             </View>
+
+            <TagChipSurface
+              F={F}
+              allTags={allTags}
+              tagNames={tagNames}
+              setTagNames={setTagNames}
+              showTagInput={showTagInput}
+              setShowTagInput={setShowTagInput}
+              pendingTagName={pendingTagName}
+              setPendingTagName={setPendingTagName}
+              getOrCreateTag={getOrCreateTag}
+              style={{ marginBottom: 24 }}
+            />
           </>
         )}
 
@@ -539,6 +578,8 @@ function Add({ navigation }) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             {KEYS.map(k => (
               <TouchableOpacity key={k} onPress={() => press(k)} activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={k === '⌫' ? 'Backspace' : k === '.' ? 'Decimal point' : `Digit ${k}`}
                 style={{ width: '33.33%', paddingVertical: 14, alignItems: 'center' }}>
                 <Text style={{ fontSize: k === '⌫' ? 20 : 24, color: F.ink, fontWeight: '400' }}>{k}</Text>
               </TouchableOpacity>
@@ -553,6 +594,8 @@ function Add({ navigation }) {
           onPress={save}
           disabled={saving}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={saving ? 'Saving' : 'Save'}
           style={{
             backgroundColor: ctaColor, borderRadius: 14, paddingVertical: 16,
             alignItems: 'center', opacity: saving ? 0.6 : 1,

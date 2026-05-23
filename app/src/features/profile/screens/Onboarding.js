@@ -120,6 +120,9 @@ function Onboarding() {
                 <TouchableOpacity
                   key={a}
                   onPress={() => setAvatar(a)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Avatar ${a}`}
+                  accessibilityState={{ selected: sel }}
                   style={{
                     width: 52, height: 52, borderRadius: 26,
                     backgroundColor: sel ? F.coral : F.cream,
@@ -151,6 +154,9 @@ function Onboarding() {
                 <TouchableOpacity
                   key={code}
                   onPress={() => setCurrency(code)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Currency ${code}`}
+                  accessibilityState={{ selected: sel }}
                   style={{
                     flexDirection: 'row', alignItems: 'center', gap: 8,
                     paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14,

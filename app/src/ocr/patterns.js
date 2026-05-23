@@ -508,6 +508,15 @@ export const DISCOUNT_RE  = unionRe(DISCOUNT_KEYWORDS);
 export const META_RE      = unionRe(META_KEYWORDS);
 export const BILL_HDR_RE  = unionRe(BILL_HEADER_KEYWORDS);
 
+// META_KEYWORDS members that show up as PER-ROW COLUMN LABELS on departmental,
+// restaurant, and grocery receipts (e.g. "HSN.", "SAC." printed alongside each
+// item's qty/rate/amt). These must NOT cause the entire item row to be skipped
+// — otherwise every item on a SUPERMART / DMart / Reliance Smart bill gets
+// dropped before extraction. They stay in META_KEYWORDS so META_RE /
+// looksLikeMetaOnly still classify a STANDALONE "HSN: 04039000" row as
+// metadata for totals / merchant detection.
+const COLUMN_LABEL_META_KEYWORDS = new Set(['hsn', 'sac']);
+
 // Identifies rows that should never become items.
 // Catches: totals, subtotals, taxes, fees, discounts, metadata, bill headers.
 export const SKIP_RE = new RegExp(
@@ -517,7 +526,7 @@ export const SKIP_RE = new RegExp(
     ...TAX_KEYWORDS,
     ...FEE_KEYWORDS,
     ...DISCOUNT_KEYWORDS,
-    ...META_KEYWORDS,
+    ...META_KEYWORDS.filter(k => !COLUMN_LABEL_META_KEYWORDS.has(k)),
     ...BILL_HEADER_KEYWORDS,
   ].sort((a, b) => b.length - a.length).join('|') + ')',
   'i'

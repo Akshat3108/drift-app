@@ -129,6 +129,9 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
         {EMOJIS.map(e => (
           <TouchableOpacity key={e} onPress={() => setEmoji(e)}
+            accessibilityRole="button"
+            accessibilityLabel={`Emoji ${e}`}
+            accessibilityState={{ selected: emoji === e }}
             style={{ width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
               backgroundColor: emoji === e ? F.cream : F.surface,
               borderWidth: 2, borderColor: emoji === e ? F.coral : F.line }}>
@@ -143,6 +146,10 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
           const sel = color === c.key;
           return (
             <TouchableOpacity key={c.key} onPress={() => setColor(c.key)}
+              hitSlop={{ top: 8, bottom: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Colour ${c.label}`}
+              accessibilityState={{ selected: sel }}
               style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
                 backgroundColor: sel ? F.coral : F[c.key],
                 borderWidth: 1, borderColor: sel ? F.coral : F.line }}>

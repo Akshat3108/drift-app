@@ -1,0 +1,53 @@
+{
+  "name": "supermart_departmental",
+  "notes": "Real thermal-printed SUPERMART receipt (a unit of Stop & Shop, Sector 12 NOIDA U.P., GSTIN 09ACDFS3771Q1Z1, FSSAI 12719005000253). 2 items, ₹107 total. Layout: 6-column item table — S.N | DESCRIPTION | HSN. | QTY | MRP | OUR PRICE | AMT — where the HSN token sits inline on each item row at the y-baseline. Regression-tracking fixture for the prior 'HSN-on-item-row dropped the whole line' bug fixed by carving COLUMN_LABEL_META_KEYWORDS out of SKIP_RE. The inline HSN. token still survives into the item name ('AMUL MASTI DAHI HSN.') because the columnar extractor doesn't recognise it as a column-label vs item-name token — known cosmetic issue, user edits in Review. detectFormat lands on 'departmental' on a single signal hit ('HSN'), then the brand-hint fallback would also route any DMart/Reliance/etc. brand there.",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Home"}
+  ],
+  "expected": {
+    "merchant": "SUPERMART",
+    "date": "2026-05-22",
+    "total": 107,
+    "format": "departmental",
+    "items": [
+      {"name": "AMUL MASTI DAHI HSN.", "price": 35},
+      {"name": "FULL CREAM MILK HSN.", "price": 72}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1000, "height": 1000},
+        "lines": [
+          {"text": "SUPERMART", "frame": {"left": 340, "top": 60, "width": 320, "height": 36}, "elements": [{"text": "SUPERMART", "frame": {"left": 340, "width": 320}}]},
+          {"text": "(A UNIT OF STOP & SHOP)", "frame": {"left": 290, "top": 100, "width": 420, "height": 28}, "elements": [{"text": "(A UNIT OF STOP & SHOP)", "frame": {"left": 290, "width": 420}}]},
+          {"text": "GSTIN: 09ACDFS3771Q1Z1", "frame": {"left": 200, "top": 140, "width": 580, "height": 28}, "elements": [{"text": "GSTIN:", "frame": {"left": 200, "width": 84}}, {"text": "09ACDFS3771Q1Z1", "frame": {"left": 360, "width": 380}}]},
+          {"text": "FSSAI: 12719005000253", "frame": {"left": 200, "top": 170, "width": 540, "height": 28}, "elements": [{"text": "FSSAI:", "frame": {"left": 200, "width": 84}}, {"text": "12719005000253", "frame": {"left": 360, "width": 340}}]},
+          {"text": "Shop No. 1,4,4 Annapurni Princey", "frame": {"left": 200, "top": 200, "width": 600, "height": 28}, "elements": [{"text": "Shop No. 1,4,4 Annapurni Princey", "frame": {"left": 200, "width": 600}}]},
+          {"text": "Sector 12 NOIDA U.P.", "frame": {"left": 250, "top": 230, "width": 480, "height": 28}, "elements": [{"text": "Sector 12 NOIDA U.P.", "frame": {"left": 250, "width": 480}}]},
+          {"text": "Phone 9999447281, 9999677281", "frame": {"left": 200, "top": 260, "width": 600, "height": 28}, "elements": [{"text": "Phone 9999447281, 9999677281", "frame": {"left": 200, "width": 600}}]},
+          {"text": "RETAIL INVOICE", "frame": {"left": 380, "top": 300, "width": 240, "height": 28}, "elements": [{"text": "RETAIL INVOICE", "frame": {"left": 380, "width": 240}}]},
+          {"text": "PAYTM", "frame": {"left": 460, "top": 335, "width": 80, "height": 28}, "elements": [{"text": "PAYTM", "frame": {"left": 460, "width": 80}}]},
+
+          {"text": "BILL NO. 2627004463    DATE 22/05/26", "frame": {"left": 100, "top": 380, "width": 800, "height": 28}, "elements": [{"text": "BILL", "frame": {"left": 100, "width": 56}}, {"text": "NO.", "frame": {"left": 170, "width": 42}}, {"text": "2627004463", "frame": {"left": 230, "width": 230}}, {"text": "DATE", "frame": {"left": 560, "width": 56}}, {"text": "22/05/26", "frame": {"left": 640, "width": 200}}]},
+          {"text": "TIME 8:53    CASHIER MONU KASHYAP", "frame": {"left": 100, "top": 410, "width": 800, "height": 28}, "elements": [{"text": "TIME", "frame": {"left": 100, "width": 56}}, {"text": "8:53", "frame": {"left": 180, "width": 110}}, {"text": "CASHIER", "frame": {"left": 360, "width": 98}}, {"text": "MONU", "frame": {"left": 500, "width": 70}}, {"text": "KASHYAP", "frame": {"left": 600, "width": 200}}]},
+
+          {"text": "S.N  DESCRIPTION  QTY  MRP  OUR PRICE  AMT", "frame": {"left": 60, "top": 470, "width": 900, "height": 28}, "elements": [{"text": "S.N", "frame": {"left": 60, "width": 42}}, {"text": "DESCRIPTION", "frame": {"left": 140, "width": 240}}, {"text": "QTY", "frame": {"left": 560, "width": 42}}, {"text": "MRP", "frame": {"left": 680, "width": 42}}, {"text": "OUR", "frame": {"left": 760, "width": 42}}, {"text": "PRICE", "frame": {"left": 810, "width": 110}}, {"text": "AMT", "frame": {"left": 900, "width": 42}}]},
+
+          {"text": "1  AMUL MASTI DAHI 400GM  HSN.  1.000  35.00  35.00  35.00", "frame": {"left": 60, "top": 510, "width": 900, "height": 28}, "elements": [{"text": "1", "frame": {"left": 60, "width": 30}}, {"text": "AMUL", "frame": {"left": 140, "width": 90}}, {"text": "MASTI", "frame": {"left": 240, "width": 100}}, {"text": "DAHI", "frame": {"left": 350, "width": 80}}, {"text": "400GM", "frame": {"left": 440, "width": 100}}, {"text": "HSN.", "frame": {"left": 540, "width": 70}}, {"text": "1.000", "frame": {"left": 600, "width": 90}}, {"text": "35.00", "frame": {"left": 700, "width": 90}}, {"text": "35.00", "frame": {"left": 800, "width": 90}}, {"text": "35.00", "frame": {"left": 900, "width": 90}}]},
+
+          {"text": "2  FULL CREAM MILK 500ML  HSN.  2.000  36.00  36.00  72.00", "frame": {"left": 60, "top": 545, "width": 900, "height": 28}, "elements": [{"text": "2", "frame": {"left": 60, "width": 30}}, {"text": "FULL", "frame": {"left": 140, "width": 90}}, {"text": "CREAM", "frame": {"left": 240, "width": 110}}, {"text": "MILK", "frame": {"left": 360, "width": 80}}, {"text": "500ML", "frame": {"left": 440, "width": 100}}, {"text": "HSN.", "frame": {"left": 540, "width": 70}}, {"text": "2.000", "frame": {"left": 600, "width": 90}}, {"text": "36.00", "frame": {"left": 700, "width": 90}}, {"text": "36.00", "frame": {"left": 800, "width": 90}}, {"text": "72.00", "frame": {"left": 900, "width": 90}}]},
+
+          {"text": "Total Qty  3.000      Total  107.00", "frame": {"left": 100, "top": 600, "width": 800, "height": 28}, "elements": [{"text": "Total", "frame": {"left": 100, "width": 70}}, {"text": "Qty", "frame": {"left": 200, "width": 42}}, {"text": "3.000", "frame": {"left": 300, "width": 110}}, {"text": "Total", "frame": {"left": 560, "width": 70}}, {"text": "107.00", "frame": {"left": 700, "width": 200}}]},
+          {"text": "AMT TO PAY                    107.00", "frame": {"left": 60, "top": 640, "width": 900, "height": 28}, "elements": [{"text": "AMT", "frame": {"left": 60, "width": 42}}, {"text": "TO", "frame": {"left": 130, "width": 28}}, {"text": "PAY", "frame": {"left": 180, "width": 70}}, {"text": "107.00", "frame": {"left": 800, "width": 200}}]},
+
+          {"text": "(Rupees one hundred seven Only)", "frame": {"left": 140, "top": 680, "width": 720, "height": 28}, "elements": [{"text": "(Rupees one hundred seven Only)", "frame": {"left": 140, "width": 720}}]},
+          {"text": "* PRICES ARE INCLUSIVE OF GST *", "frame": {"left": 220, "top": 720, "width": 580, "height": 28}, "elements": [{"text": "* PRICES ARE INCLUSIVE OF GST *", "frame": {"left": 220, "width": 580}}]},
+          {"text": "* THANKS FOR YOUR KIND VISIT *", "frame": {"left": 220, "top": 750, "width": 580, "height": 28}, "elements": [{"text": "* THANKS FOR YOUR KIND VISIT *", "frame": {"left": 220, "width": 580}}]},
+          {"text": "* FREE HOME DELIVERY *", "frame": {"left": 280, "top": 780, "width": 460, "height": 28}, "elements": [{"text": "* FREE HOME DELIVERY *", "frame": {"left": 280, "width": 460}}]}
+        ]
+      }
+    ]
+  }
+}

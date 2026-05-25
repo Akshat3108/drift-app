@@ -13,7 +13,11 @@ const FORMAT_CONFIGS = {
     label: 'Quick commerce',
     itemStrategy: 'card',     // name/qty/price often on adjacent lines
     feeWhitelist: ['handling', 'delivery', 'packaging', 'tip'],
-    subtotalPriority: ['mrp', 'item total', 'sub total'],
+    // 'item total' first: Blinkit prints BOTH "MRP ₹328" (pre-discount gross)
+    // and "Item Total ₹228" (post-discount net) — the net is what the user
+    // expects as the subtotal. Zepto only prints "Item Total" so order
+    // doesn't matter there.
+    subtotalPriority: ['item total', 'mrp', 'sub total'],
     totalPriority: ['bill total', 'order total', 'grand total', 'amount payable'],
     expectItems: true,
     merchantHints: ['Blinkit', 'Zepto', 'Swiggy Instamart', 'BigBasket', 'BB Now', 'Dunzo'],
@@ -40,10 +44,19 @@ const FORMAT_CONFIGS = {
     label: 'Restaurant',
     itemStrategy: 'tabular',
     feeWhitelist: ['service charge', 'cover charge', 'tip', 'gratuity'],
-    subtotalPriority: ['sub total', 'subtotal', 'gross amount', 'total before tax'],
-    totalPriority: ['grand total', 'net amount', 'bill total', 'amount payable', 'total'],
+    subtotalPriority: ['sub total', 'subtotal', 'total amount', 'gross amount', 'total before tax'],
+    // 'rounded off' first: Indian POS receipts (Starbucks, McDonald's, café
+    // chains pre-GST) print both "Net Invoice Amount ₹311.24" (the unrounded
+    // tax-inclusive total) AND "Rounded Off Invoice Amount ₹311.00" (the
+    // cash-tendered figure). The rounded form is what the user paid.
+    totalPriority: ['rounded off', 'grand total', 'net amount', 'bill total', 'amount payable', 'total'],
     expectItems: true,
-    merchantHints: [],
+    // Brand-hint fallback (detectFormat.js): when no signature regex fires,
+    // detectFormat consults each format's merchantHints + the matched brand
+    // to break the tie. Café / QSR chains rarely print the strong signals
+    // (KOT, table no, FSSAI) on a small dine-in receipt; the brand match is
+    // often the only signal we have.
+    merchantHints: ['Starbucks', 'Café Coffee Day', "McDonald's", 'KFC', 'Domino’s', 'Pizza Hut', 'Subway', 'Burger King'],
   },
   departmental: {
     label: 'Departmental',
@@ -166,6 +179,30 @@ export function detectFormat(rows) {
     }
   }
 
+  const brand = matchBrand(fullText);
+
+  // Brand-hint fallback. Small thermal café / restaurant receipts (e.g. a
+  // 2-item Starbucks coffee bill) frequently fail every signature regex —
+  // they don't print KOT / table no / FSSAI / service charge — and the
+  // signal count drops to 0, which would send them to handwritten/generic
+  // with the permissive item extractor. When that happens AND we recognised
+  // the brand, prefer the format whose merchantHints list it: a Starbucks
+  // bill is far more likely to be a restaurant than handwritten.
+  if (best.hits < 2 && brand) {
+    for (const def of FORMAT_SIGNATURES) {
+      const cfg = FORMAT_CONFIGS[def.format];
+      if (cfg?.merchantHints?.includes(brand)) {
+        // hits=2: treat brand-on-hint-list as equivalent to two signature
+        // matches, so the handwritten/generic fallback below doesn't
+        // immediately overwrite us. The later formatConfidence calc gets
+        // boosted to 0.8 by the (brand && merchantHints.includes(brand))
+        // check, matching what a real 2-signal-hit detection would score.
+        best = { format: def.format, hits: 2, fired: [...best.fired, 'brand-hint'] };
+        break;
+      }
+    }
+  }
+
   // No strong signals → handwritten or generic?
   if (best.hits < 2) {
     if (looksHandwritten(rows, signals)) {
@@ -175,7 +212,6 @@ export function detectFormat(rows) {
     }
   }
 
-  const brand = matchBrand(fullText);
   const config = FORMAT_CONFIGS[best.format] || FORMAT_CONFIGS.generic;
 
   // Confidence in the format choice itself (0..1).

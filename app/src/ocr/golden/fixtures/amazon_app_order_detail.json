@@ -1,0 +1,61 @@
+{
+  "name": "amazon_app_order_detail",
+  "notes": "Real Amazon India app order-detail screenshot (/home/akshat/Downloads/Screenshot_20260523_221726_Amazon.jpg). Single-item delivered order — BUILDSKILL 1000mm Sink Pipe, ₹219 + ₹5 Marketplace Fee = ₹224. This is the SECOND Amazon variant alongside amazon_online_retail.json (paper tax invoice). Key differences from the tax-invoice variant: (a) NO 'amazon.in' / 'Amazon' brand word in the OCR text — the Amazon brand is the app's status-bar logo only; (b) product card spans multiple rows (name → 'Sold by:' → 'Replace item:' → price) with chrome rows BETWEEN the name and price that findNameBackward must skip via CHROME_PREFIX_RE; (c) NO 'Tax Invoice' header; (d) new fee type 'Marketplace Fee ₹5' added to FEE_KEYWORDS; (e) the price row is an orphan ('₹219.00' alone with no name on the same y) — rowHasNoOwnAlpha must NOT skip it (only skips items-count-footer pattern '2  265.00'). Tests four structural fixes landed in this session: (1) online_retail merchant skip-guess when no brand match → 'Unknown store' instead of 'Delivered on 22 May...'; (2) FEE_KEYWORDS gains 'marketplace fee'; (3) rowHasNoOwnAlpha narrowed to digit-prefixed footer pattern; (4) findNameBackward's CHROME_PREFIX_RE skips 'Sold by:' / 'Replace item:' / 'View your item' / 'Track package' / 'Get product support' / 'Leave seller feedback' / 'Write a product review' / 'See details' / 'Eligible till' chrome above the price.",
+  "pots": [
+    {"id": 1, "name": "Shopping"},
+    {"id": 2, "name": "Home"}
+  ],
+  "expected": {
+    "merchant": "Unknown store",
+    "date": "2026-05-22",
+    "total": 224,
+    "subtotal": 219,
+    "format": "online_retail",
+    "items": [
+      {"name": "BUILDSKILL 1000mm Sink Pipe f...", "price": 219}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 900, "height": 1900},
+        "lines": [
+          {"text": "Delivered on 22 May at 7:32 pm", "frame": {"left": 60, "top": 210, "width": 600, "height": 36}, "elements": [{"text": "Delivered on 22 May at 7:32 pm", "frame": {"left": 60, "width": 600}}]},
+          {"text": "Delivered in 5 hrs 15 mins. Package", "frame": {"left": 60, "top": 280, "width": 600, "height": 30}, "elements": [{"text": "Delivered in 5 hrs 15 mins. Package", "frame": {"left": 60, "width": 600}}]},
+          {"text": "was handed to resident.", "frame": {"left": 60, "top": 320, "width": 400, "height": 30}, "elements": [{"text": "was handed to resident.", "frame": {"left": 60, "width": 400}}]},
+          {"text": "See details", "frame": {"left": 60, "top": 390, "width": 200, "height": 32}, "elements": [{"text": "See details", "frame": {"left": 60, "width": 200}}]},
+
+          {"text": "BUILDSKILL 1000mm Sink Pipe f...", "frame": {"left": 220, "top": 510, "width": 600, "height": 36}, "elements": [{"text": "BUILDSKILL 1000mm Sink Pipe f...", "frame": {"left": 220, "width": 600}}]},
+          {"text": "Sold by: Clicktech Retail Private Ltd", "frame": {"left": 220, "top": 580, "width": 600, "height": 30}, "elements": [{"text": "Sold by: Clicktech Retail Private Ltd", "frame": {"left": 220, "width": 600}}]},
+          {"text": "Replace item: Eligible till 1 June 2026", "frame": {"left": 220, "top": 640, "width": 600, "height": 30}, "elements": [{"text": "Replace item: Eligible till 1 June 2026", "frame": {"left": 220, "width": 600}}]},
+          {"text": "₹219.00", "frame": {"left": 220, "top": 700, "width": 160, "height": 32}, "elements": [{"text": "₹219.00", "frame": {"left": 220, "width": 160}}]},
+          {"text": "View your item", "frame": {"left": 220, "top": 760, "width": 240, "height": 30}, "elements": [{"text": "View your item", "frame": {"left": 220, "width": 240}}]},
+
+          {"text": "Get product support", "frame": {"left": 60, "top": 830, "width": 280, "height": 36}, "elements": [{"text": "Get product support", "frame": {"left": 60, "width": 280}}]},
+          {"text": "Track package", "frame": {"left": 400, "top": 830, "width": 220, "height": 36}, "elements": [{"text": "Track package", "frame": {"left": 400, "width": 220}}]},
+          {"text": "Replace item", "frame": {"left": 60, "top": 900, "width": 220, "height": 36}, "elements": [{"text": "Replace item", "frame": {"left": 60, "width": 220}}]},
+          {"text": "Leave seller feedback", "frame": {"left": 320, "top": 900, "width": 320, "height": 36}, "elements": [{"text": "Leave seller feedback", "frame": {"left": 320, "width": 320}}]},
+          {"text": "Leave delivery feedback", "frame": {"left": 60, "top": 970, "width": 340, "height": 36}, "elements": [{"text": "Leave delivery feedback", "frame": {"left": 60, "width": 340}}]},
+          {"text": "Write a product review", "frame": {"left": 60, "top": 1040, "width": 320, "height": 36}, "elements": [{"text": "Write a product review", "frame": {"left": 60, "width": 320}}]},
+
+          {"text": "Order summary", "frame": {"left": 60, "top": 1280, "width": 280, "height": 36}, "elements": [{"text": "Order summary", "frame": {"left": 60, "width": 280}}]},
+          {"text": "Order placed 22 May 2026", "frame": {"left": 60, "top": 1330, "width": 400, "height": 30}, "elements": [{"text": "Order placed 22 May 2026", "frame": {"left": 60, "width": 400}}]},
+          {"text": "Order number 403-9760034-9116365", "frame": {"left": 60, "top": 1380, "width": 600, "height": 30}, "elements": [{"text": "Order number 403-9760034-9116365", "frame": {"left": 60, "width": 600}}]},
+
+          {"text": "Item(s) Subtotal:", "frame": {"left": 60, "top": 1490, "width": 280, "height": 30}, "elements": [{"text": "Item(s) Subtotal:", "frame": {"left": 60, "width": 280}}]},
+          {"text": "₹219.00", "frame": {"left": 700, "top": 1490, "width": 160, "height": 30}, "elements": [{"text": "₹219.00", "frame": {"left": 700, "width": 160}}]},
+          {"text": "Shipping:", "frame": {"left": 60, "top": 1530, "width": 200, "height": 30}, "elements": [{"text": "Shipping:", "frame": {"left": 60, "width": 200}}]},
+          {"text": "₹0.00", "frame": {"left": 700, "top": 1530, "width": 140, "height": 30}, "elements": [{"text": "₹0.00", "frame": {"left": 700, "width": 140}}]},
+          {"text": "Marketplace Fee:", "frame": {"left": 60, "top": 1570, "width": 280, "height": 30}, "elements": [{"text": "Marketplace Fee:", "frame": {"left": 60, "width": 280}}]},
+          {"text": "₹5.00", "frame": {"left": 700, "top": 1570, "width": 140, "height": 30}, "elements": [{"text": "₹5.00", "frame": {"left": 700, "width": 140}}]},
+          {"text": "Total:", "frame": {"left": 60, "top": 1610, "width": 160, "height": 30}, "elements": [{"text": "Total:", "frame": {"left": 60, "width": 160}}]},
+          {"text": "₹224.00", "frame": {"left": 700, "top": 1610, "width": 160, "height": 30}, "elements": [{"text": "₹224.00", "frame": {"left": 700, "width": 160}}]},
+          {"text": "Grand Total:", "frame": {"left": 60, "top": 1660, "width": 240, "height": 36}, "elements": [{"text": "Grand Total:", "frame": {"left": 60, "width": 240}}]},
+          {"text": "₹224.00", "frame": {"left": 700, "top": 1660, "width": 160, "height": 36}, "elements": [{"text": "₹224.00", "frame": {"left": 700, "width": 160}}]},
+
+          {"text": "Download Invoice", "frame": {"left": 60, "top": 1730, "width": 280, "height": 30}, "elements": [{"text": "Download Invoice", "frame": {"left": 60, "width": 280}}]}
+        ]
+      }
+    ]
+  }
+}

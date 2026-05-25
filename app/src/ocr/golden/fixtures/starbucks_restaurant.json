@@ -1,0 +1,80 @@
+{
+  "name": "starbucks_restaurant",
+  "notes": "Real thermal-printed Starbucks receipt — Tata Starbucks Limited, Chapel Road, Mumbai-400050 (Invoice 12698026140407, 06-04-2014, 17:06). 2 items (Short Capuccino ₹110, Chocolate Truffle Gateaux ₹155). Bill breakdown: items ₹265 → VAT 33.12 + Service Tax 13.12 → Net 311.24 → Rounded Off 311.00. Layout-specific signals: (a) the BRAND-HINT fallback path — none of restaurant's signature regexes (KOT, table no, service charge, FSSAI, CGST/SGST) fire because this is a pre-GST 2014 receipt using the older VAT+Service-Tax stack, so detectFormat lands on quick_commerce/handwritten on signal count alone. The 'Starbucks' brand match in matchBrand is the only signal; it routes via the brand-hint pass to restaurant; (b) 'Rounded Off Invoice Amount 311.00' is the final cash-tendered figure (Net 311.24 is the unrounded pre-tax-rounding total). restaurant.totalPriority puts 'rounded off' first; (c) 'Net Invoice Amount' is in TOTAL_KEYWORDS so the bill section is correctly skipped from item extraction; (d) findBillBands uses min(billHeaderY, totalY) — the 'PAYMENT DETAILS' header appears BELOW the totals on this receipt (unlike typical 'Bill details → totals'), so picking the header-only branch would let 'Card Amount : 311.00' leak as a fake item; (e) the items-subtotal footer '2 265.00' has no alphabetic content of its own and is filtered by rowHasNoOwnAlpha; (f) 'Short Capuccino' contains 'cin' as a substring — without word boundaries SKIP_RE's META keyword 'cin' (Corporate ID) was matching it and dropping the item entirely.",
+  "pots": [
+    {"id": 1, "name": "Food & Drink"},
+    {"id": 2, "name": "Groceries"}
+  ],
+  "expected": {
+    "merchant": "Starbucks",
+    "date": "2014-04-06",
+    "total": 311,
+    "format": "restaurant",
+    "items": [
+      {"name": "Short Capuccino", "price": 110},
+      {"name": "Chocolate Truffle Gateaux", "price": 155}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1200, "height": 1600},
+        "lines": [
+          {"text": "TATA STARBUCKS LIMITED", "frame": {"left": 240, "top": 300, "width": 480, "height": 32}, "elements": [{"text": "TATA", "frame": {"left": 240, "width": 90}}, {"text": "STARBUCKS", "frame": {"left": 340, "width": 220}}, {"text": "LIMITED", "frame": {"left": 570, "width": 150}}]},
+          {"text": "Chapel Road", "frame": {"left": 300, "top": 340, "width": 200, "height": 28}, "elements": [{"text": "Chapel", "frame": {"left": 300, "width": 110}}, {"text": "Road", "frame": {"left": 420, "width": 80}}]},
+          {"text": "Chapel Road", "frame": {"left": 300, "top": 375, "width": 200, "height": 28}, "elements": [{"text": "Chapel", "frame": {"left": 300, "width": 110}}, {"text": "Road", "frame": {"left": 420, "width": 80}}]},
+          {"text": "Mumbai-400050", "frame": {"left": 290, "top": 410, "width": 220, "height": 28}, "elements": [{"text": "Mumbai-400050", "frame": {"left": 290, "width": 220}}]},
+
+          {"text": "BILL", "frame": {"left": 80, "top": 510, "width": 120, "height": 32}, "elements": [{"text": "BILL", "frame": {"left": 80, "width": 120}}]},
+          {"text": "Invoice No :12698026140407", "frame": {"left": 80, "top": 575, "width": 600, "height": 28}, "elements": [{"text": "Invoice", "frame": {"left": 80, "width": 130}}, {"text": "No", "frame": {"left": 220, "width": 50}}, {"text": ":12698026140407", "frame": {"left": 280, "width": 400}}]},
+          {"text": "Invoice Date:06-04-2014", "frame": {"left": 80, "top": 615, "width": 460, "height": 28}, "elements": [{"text": "Invoice", "frame": {"left": 80, "width": 130}}, {"text": "Date:06-04-2014", "frame": {"left": 220, "width": 320}}]},
+          {"text": "Invoice Time:05:06 PM", "frame": {"left": 80, "top": 655, "width": 440, "height": 28}, "elements": [{"text": "Invoice", "frame": {"left": 80, "width": 130}}, {"text": "Time:05:06", "frame": {"left": 220, "width": 220}}, {"text": "PM", "frame": {"left": 450, "width": 70}}]},
+          {"text": "Shift Code:3", "frame": {"left": 880, "top": 575, "width": 280, "height": 28}, "elements": [{"text": "Shift", "frame": {"left": 880, "width": 100}}, {"text": "Code:3", "frame": {"left": 990, "width": 170}}]},
+          {"text": "Till No:2 A", "frame": {"left": 880, "top": 615, "width": 240, "height": 28}, "elements": [{"text": "Till", "frame": {"left": 880, "width": 80}}, {"text": "No:2", "frame": {"left": 970, "width": 100}}, {"text": "A", "frame": {"left": 1080, "width": 40}}]},
+          {"text": "Partner:Narend", "frame": {"left": 880, "top": 655, "width": 300, "height": 28}, "elements": [{"text": "Partner:Narend", "frame": {"left": 880, "width": 300}}]},
+
+          {"text": "Item name", "frame": {"left": 80, "top": 730, "width": 220, "height": 28}, "elements": [{"text": "Item", "frame": {"left": 80, "width": 80}}, {"text": "name", "frame": {"left": 170, "width": 130}}]},
+          {"text": "Qty", "frame": {"left": 700, "top": 730, "width": 80, "height": 28}, "elements": [{"text": "Qty", "frame": {"left": 700, "width": 80}}]},
+          {"text": "Sale Price", "frame": {"left": 880, "top": 730, "width": 220, "height": 28}, "elements": [{"text": "Sale", "frame": {"left": 880, "width": 90}}, {"text": "Price", "frame": {"left": 980, "width": 120}}]},
+
+          {"text": "Short Capuccino", "frame": {"left": 80, "top": 810, "width": 360, "height": 28}, "elements": [{"text": "Short", "frame": {"left": 80, "width": 110}}, {"text": "Capuccino", "frame": {"left": 200, "width": 240}}]},
+          {"text": "1", "frame": {"left": 720, "top": 810, "width": 30, "height": 28}, "elements": [{"text": "1", "frame": {"left": 720, "width": 30}}]},
+          {"text": "110.00", "frame": {"left": 920, "top": 810, "width": 140, "height": 28}, "elements": [{"text": "110.00", "frame": {"left": 920, "width": 140}}]},
+
+          {"text": "Chocolate Truffle Gateaux", "frame": {"left": 80, "top": 860, "width": 540, "height": 28}, "elements": [{"text": "Chocolate", "frame": {"left": 80, "width": 200}}, {"text": "Truffle", "frame": {"left": 290, "width": 130}}, {"text": "Gateaux", "frame": {"left": 430, "width": 190}}]},
+          {"text": "1", "frame": {"left": 720, "top": 860, "width": 30, "height": 28}, "elements": [{"text": "1", "frame": {"left": 720, "width": 30}}]},
+          {"text": "155.00", "frame": {"left": 920, "top": 860, "width": 140, "height": 28}, "elements": [{"text": "155.00", "frame": {"left": 920, "width": 140}}]},
+
+          {"text": "2", "frame": {"left": 720, "top": 920, "width": 30, "height": 28}, "elements": [{"text": "2", "frame": {"left": 720, "width": 30}}]},
+          {"text": "265.00", "frame": {"left": 920, "top": 920, "width": 140, "height": 28}, "elements": [{"text": "265.00", "frame": {"left": 920, "width": 140}}]},
+
+          {"text": "Total Amount", "frame": {"left": 80, "top": 985, "width": 280, "height": 28}, "elements": [{"text": "Total", "frame": {"left": 80, "width": 110}}, {"text": "Amount", "frame": {"left": 200, "width": 160}}]},
+          {"text": "265.00", "frame": {"left": 920, "top": 985, "width": 140, "height": 28}, "elements": [{"text": "265.00", "frame": {"left": 920, "width": 140}}]},
+          {"text": "VAT Amount", "frame": {"left": 80, "top": 1020, "width": 240, "height": 28}, "elements": [{"text": "VAT", "frame": {"left": 80, "width": 80}}, {"text": "Amount", "frame": {"left": 170, "width": 160}}]},
+          {"text": "33.12", "frame": {"left": 920, "top": 1020, "width": 120, "height": 28}, "elements": [{"text": "33.12", "frame": {"left": 920, "width": 120}}]},
+          {"text": "Service Tax on 'For Here'*", "frame": {"left": 80, "top": 1055, "width": 540, "height": 28}, "elements": [{"text": "Service", "frame": {"left": 80, "width": 130}}, {"text": "Tax", "frame": {"left": 220, "width": 70}}, {"text": "on", "frame": {"left": 300, "width": 50}}, {"text": "'For", "frame": {"left": 360, "width": 70}}, {"text": "Here'*", "frame": {"left": 440, "width": 180}}]},
+          {"text": "13.12", "frame": {"left": 920, "top": 1055, "width": 120, "height": 28}, "elements": [{"text": "13.12", "frame": {"left": 920, "width": 120}}]},
+          {"text": "Net Invoice Amount", "frame": {"left": 80, "top": 1090, "width": 360, "height": 28}, "elements": [{"text": "Net", "frame": {"left": 80, "width": 70}}, {"text": "Invoice", "frame": {"left": 160, "width": 140}}, {"text": "Amount", "frame": {"left": 310, "width": 130}}]},
+          {"text": "311.24", "frame": {"left": 920, "top": 1090, "width": 140, "height": 28}, "elements": [{"text": "311.24", "frame": {"left": 920, "width": 140}}]},
+          {"text": "Rounded Off Invoice Amount", "frame": {"left": 80, "top": 1125, "width": 580, "height": 28}, "elements": [{"text": "Rounded", "frame": {"left": 80, "width": 160}}, {"text": "Off", "frame": {"left": 250, "width": 70}}, {"text": "Invoice", "frame": {"left": 330, "width": 140}}, {"text": "Amount", "frame": {"left": 480, "width": 180}}]},
+          {"text": "311.00", "frame": {"left": 920, "top": 1125, "width": 140, "height": 28}, "elements": [{"text": "311.00", "frame": {"left": 920, "width": 140}}]},
+          {"text": "*'For Here' Total", "frame": {"left": 80, "top": 1160, "width": 380, "height": 28}, "elements": [{"text": "*'For", "frame": {"left": 80, "width": 110}}, {"text": "Here'", "frame": {"left": 200, "width": 110}}, {"text": "Total", "frame": {"left": 320, "width": 140}}]},
+
+          {"text": "PAYMENT SUMMARY", "frame": {"left": 80, "top": 1240, "width": 420, "height": 28}, "elements": [{"text": "PAYMENT", "frame": {"left": 80, "width": 200}}, {"text": "SUMMARY", "frame": {"left": 290, "width": 210}}]},
+          {"text": ": 311.00", "frame": {"left": 920, "top": 1240, "width": 180, "height": 28}, "elements": [{"text": ":", "frame": {"left": 920, "width": 20}}, {"text": "311.00", "frame": {"left": 950, "width": 150}}]},
+          {"text": "Card Amount", "frame": {"left": 80, "top": 1280, "width": 260, "height": 28}, "elements": [{"text": "Card", "frame": {"left": 80, "width": 100}}, {"text": "Amount", "frame": {"left": 190, "width": 150}}]},
+          {"text": ": 311.00", "frame": {"left": 920, "top": 1280, "width": 180, "height": 28}, "elements": [{"text": ":", "frame": {"left": 920, "width": 20}}, {"text": "311.00", "frame": {"left": 950, "width": 150}}]},
+          {"text": "Total Amount", "frame": {"left": 80, "top": 1320, "width": 280, "height": 28}, "elements": [{"text": "Total", "frame": {"left": 80, "width": 110}}, {"text": "Amount", "frame": {"left": 200, "width": 160}}]},
+          {"text": ": 00.00", "frame": {"left": 920, "top": 1320, "width": 180, "height": 28}, "elements": [{"text": ":", "frame": {"left": 920, "width": 20}}, {"text": "00.00", "frame": {"left": 950, "width": 150}}]},
+          {"text": "Amount Repaid", "frame": {"left": 80, "top": 1360, "width": 300, "height": 28}, "elements": [{"text": "Amount", "frame": {"left": 80, "width": 160}}, {"text": "Repaid", "frame": {"left": 250, "width": 130}}]},
+
+          {"text": "PAYMENT DETAILS", "frame": {"left": 80, "top": 1430, "width": 400, "height": 28}, "elements": [{"text": "PAYMENT", "frame": {"left": 80, "width": 200}}, {"text": "DETAILS", "frame": {"left": 290, "width": 190}}]},
+          {"text": ": 311.00", "frame": {"left": 920, "top": 1430, "width": 180, "height": 28}, "elements": [{"text": ":", "frame": {"left": 920, "width": 20}}, {"text": "311.00", "frame": {"left": 950, "width": 150}}]},
+          {"text": "Card Amount", "frame": {"left": 80, "top": 1470, "width": 260, "height": 28}, "elements": [{"text": "Card", "frame": {"left": 80, "width": 100}}, {"text": "Amount", "frame": {"left": 190, "width": 150}}]},
+          {"text": ": ************6366", "frame": {"left": 920, "top": 1470, "width": 360, "height": 28}, "elements": [{"text": ":", "frame": {"left": 920, "width": 20}}, {"text": "************6366", "frame": {"left": 950, "width": 330}}]},
+          {"text": "Card No", "frame": {"left": 80, "top": 1510, "width": 180, "height": 28}, "elements": [{"text": "Card", "frame": {"left": 80, "width": 100}}, {"text": "No", "frame": {"left": 190, "width": 70}}]}
+        ]
+      }
+    ]
+  }
+}

@@ -124,14 +124,21 @@ function hasTrailingPrice(text, amounts) {
 
 export function classifyRowWithContext(text, amounts) {
   if (BILL_HDR_RE.test(text)) return 'bill_header';
-  if (META_RE.test(text))     return 'meta';
   const amts = amounts ?? matchAmounts(text);
   const trailing = hasTrailingPrice(text, amts);
+  // Test SUBTOTAL / DISCOUNT / TOTAL / TAX / FEE before META — META_KEYWORDS
+  // contains `'bill\\s*(?:no\\.?|number)?'` with an OPTIONAL number/no suffix,
+  // so bare "Bill" matches META and would steal "Bill total ₹249" from
+  // TOTAL_RE. The "Bill" / "Invoice" / "Receipt" stems in META are meant
+  // to catch "Bill #12345" / "Invoice No. 7" — those have no amount, so
+  // the SUBTOTAL/TOTAL/etc. checks above won't apply and the META fallback
+  // still catches them on the second pass.
   if (SUBTOTAL_RE.test(text)) return trailing ? 'subtotal' : 'item';
   if (DISCOUNT_RE.test(text)) return trailing ? 'discount' : 'item';
   if (TOTAL_RE.test(text))    return trailing ? 'total'    : 'item';
   if (TAX_RE.test(text))      return trailing ? 'tax'      : 'item';
   if (FEE_RE.test(text))      return trailing ? 'fee'      : 'item';
+  if (META_RE.test(text))     return 'meta';
   return 'item';
 }
 
@@ -166,12 +173,22 @@ function findDate(text) {
 // the top-most non-metadata, non-numeric line in the top 25% of the
 // receipt. We prefer top-most-y over longest because the store name almost
 // always comes first; longer lines tend to be addresses.
-function extractMerchant(rows, brand, minY, rangeY) {
+//
+// Quick-commerce / food-delivery / online-retail screenshots are an exception:
+// the merchant identifier is the app's LOGO (a sprite) not text. With no
+// brand word in the OCR, every candidate row is either chrome ("Order
+// summary", "Get Help", "Delivered on...") or an actual item name. Picking
+// either yields a wrong merchant, so we bail to "Unknown store" instead.
+function extractMerchant(rows, brand, minY, rangeY, format) {
   if (brand) return brand;
+  if (format === 'quick_commerce' || format === 'food_delivery' || format === 'online_retail') {
+    return 'Unknown store';
+  }
   const candidates = rows
     .filter(l => (l.y - minY) / rangeY < 0.25 && l.text.length > 1)
     .filter(l => !looksLikeMetaOnly(l.text))
     .filter(l => !matchAmounts(l.text).length)
+    .filter(l => !looksLikeQtyOnly(l.text))
     .filter(l => classifyRowWithContext(l.text) === 'item')
     .filter(l => {
       // Skip lines dominated by digits (addresses, phone numbers, dates).
@@ -241,7 +258,14 @@ function extractBillTotals(rows, config) {
     const cls = classifyRowWithContext(r.text, amounts);
     if (!buckets[cls]) continue;
     const amt = amounts[amounts.length - 1];
-    buckets[cls].push({ row: r, text: r.text, value: amt.absValue, signed: amt.value, y: r.y });
+    // Quick-commerce apps render waived fees as "Delivery Fee ₹30 FREE" — the
+    // visible ₹30 is the struck-through original; the actual charge is 0.
+    // Same pattern for "Handling Fee ₹10 FREE". Without this, the parser
+    // reports the user paid the fee they didn't actually pay.
+    const isFreeFee = cls === 'fee' && /\bfree\b/i.test(r.text);
+    const value  = isFreeFee ? 0 : amt.absValue;
+    const signed = isFreeFee ? 0 : amt.value;
+    buckets[cls].push({ row: r, text: r.text, value, signed, y: r.y });
   }
 
   const totalHit    = findPriority(buckets.total,    config.totalPriority || []);
@@ -277,8 +301,15 @@ function extractBillTotals(rows, config) {
 }
 
 // ── Helpers for item extraction ─────────────────────────────────────────────
+// Phrases that appear ABOVE an orphan-price row on app-style order-detail
+// screenshots (Amazon, Flipkart, etc.) — chrome between the product name
+// and the price. Without skipping these, findNameBackward returns the
+// closest chrome row ("Sold by: Clicktech Retail Private Ltd") as the
+// item name instead of walking further back to the actual product name.
+const CHROME_PREFIX_RE = /^(?:sold\s+by|replace\s+item|view\s+(?:your|product)|track\s+package|get\s+product\s+support|leave\s+(?:seller|delivery)\s+feedback|write\s+(?:a\s+)?product\s+review|see\s+details|eligible\s+till|return\s+eligible|order\s+(?:placed|number))/i;
+
 function findNameBackward(rows, idx, opts = {}) {
-  const { maxSteps = 4, stopOnSkip = true } = opts;
+  const { maxSteps = 6, stopOnSkip = true } = opts;
   for (let j = idx - 1; j >= 0 && j >= idx - maxSteps; j--) {
     const prev = rows[j];
     if (!prev) break;
@@ -289,6 +320,7 @@ function findNameBackward(rows, idx, opts = {}) {
     if (!/[a-z]/i.test(candidate)) continue;
     if (looksLikeQtyOnly(candidate)) continue;
     if (looksLikeMetaOnly(candidate)) continue;
+    if (CHROME_PREFIX_RE.test(candidate)) continue;
     return candidate;
   }
   return null;
@@ -304,6 +336,38 @@ function findQtyForward(rows, idx, bandBottom) {
     if (looksLikeQtyOnly(next.text)) return next.text.trim();
   }
   return null;
+}
+
+// Card-strategy variant of findNameBackward. Collects MULTIPLE consecutive
+// non-amount lines above the current row — Zepto/Blinkit/Instamart wrap long
+// product names across 2-3 lines ("Whole Farm Premium Black Small" /
+// "Mustard Seeds" / "200 g x 1"). Stops at the first amount-bearing row
+// (which belongs to the previous item), at meta/skip rows, or when the
+// y-gap between collected rows exceeds ~2× the row height (= next item's
+// card starts above).
+function findCardNamesBackward(rows, idx, opts = {}) {
+  const { maxSteps = 4 } = opts;
+  const collected = [];
+  let lastY = null;
+  for (let j = idx - 1; j >= 0 && j >= idx - maxSteps; j--) {
+    const prev = rows[j];
+    if (!prev) break;
+    if (SKIP_RE.test(prev.text)) break;
+    if (matchAmounts(prev.text).length) break;   // hit previous item's price row
+    const candidate = prev.text.replace(/[₹$€£¥]/g, '').trim();
+    if (candidate.length < 3) continue;
+    if (!/[a-z]/i.test(candidate)) continue;
+    if (looksLikeMetaOnly(candidate)) break;
+    if (looksLikeQtyOnly(candidate)) continue;
+    if (lastY != null) {
+      const gap = lastY - (prev.y + (prev.height || 22));
+      const thresh = (prev.height || 22) * 2;
+      if (gap > thresh) break;
+    }
+    collected.unshift(candidate);
+    lastY = prev.y;
+  }
+  return collected.length ? collected.join(' ') : null;
 }
 
 // ── Qty derivation ──────────────────────────────────────────────────────────
@@ -474,11 +538,18 @@ function normaliseMfg(raw)    { return parseDrugDate(raw, 'first'); }
 function extractPharmacyMeta(rows, idx, lookback = PHARMACY_LOOKBACK) {
   let batch = null, expiry = null, mfg = null;
   const strips = [];
+  // Walk FROM the current row backward, stopping at the previous amount-
+  // bearing row. The original forward-from-start loop hit the previous
+  // item's metadata first and "if (!batch)" then ignored the current item's
+  // own batch/exp/mfg — every item after the first inherited item 1's
+  // dates. Walking current-first AND breaking on previous-amount rows
+  // bounds the lookback to "rows that belong to THIS item card".
   const start = Math.max(0, idx - lookback);
-  for (let j = start; j <= idx; j++) {
+  for (let j = idx; j >= start; j--) {
     const text = rows[j]?.text;
     if (!text) continue;
     const onCurrent = j === idx;
+    if (!onCurrent && matchAmounts(text).length) break;
     if (!batch) {
       const m = text.match(BATCH_RE);
       if (m) {
@@ -510,28 +581,107 @@ function extractPharmacyMeta(rows, idx, lookback = PHARMACY_LOOKBACK) {
   return { batch, expiry, mfg, strips };
 }
 
+// True when the row's text is the items-section footer printed by Indian
+// thermal POS — a small leading integer (items-count) followed by an
+// amount, with no alphabetic content of its own. Example:
+//   "2  265.00"   (3 items totalling ₹265 on a Starbucks bill)
+// We deliberately do NOT skip orphan-price rows like "₹219.00" or "₹500"
+// because those are legitimate item prices on app-screenshot layouts
+// (Amazon order detail) where the product name sits on rows above. Those
+// rely on findNameBackward to recover the name.
+function rowHasNoOwnAlpha(text) {
+  const stripped = String(text)
+    .replace(/\d+(?:[.,]\d+)?/g, '')
+    .replace(/[₹$€£¥%\s\-:.,*#@\/()·•\[\]]/g, '');
+  if (stripped.length !== 0) return false;
+  return /^\s*\d{1,2}\s+\d/.test(text);
+}
+
 // ── Item strategies ─────────────────────────────────────────────────────────
+// Card-layout receipts (quick-commerce / food-delivery order screens) print
+// item cards stacked vertically. Each card is one product but may span
+// multiple OCR rows: a 1-2 line product name, a qty/pack line, a current
+// price, and — when the merchant shows a discount — a strikethrough MRP.
+//
+// The strikethrough MRP layout has two flavours:
+//   • Same-row (Blinkit): "₹117 ₹40" rendered side-by-side at the right.
+//     Both amounts land on the same OCR row.
+//   • Stacked (Zepto):    current price aligns with the name line,
+//                         strikethrough MRP aligns with the next text line.
+//     The MRP ends up on its own OCR row tightly under the current price.
+//
+// We handle the two cases together: within the loop, if a row's amount is
+// LARGER than the previously emitted item's price AND the y-gap is tight,
+// treat it as a strikethrough continuation rather than a new item — and
+// absorb any tail text (name line 2) into the previous item's name.
+// For same-row pairs, pick the smaller of the row's amounts as the price
+// and strip both from the name text.
 function extractItemsCard(rows, bands) {
   const out = [];
   const { itemBandTop, itemBandBottom } = bands;
+  let lastEmitted = null;   // { item, row } — for strikethrough-MRP detection
   for (let i = 0; i < rows.length; i++) {
     const l = rows[i];
     if (l.y < itemBandTop || l.y > itemBandBottom) continue;
     if (SKIP_RE.test(l.text)) continue;
+    if (rowHasNoOwnAlpha(l.text)) continue;   // see rowHasNoOwnAlpha doc-comment
     const amounts = matchAmounts(l.text);
     if (!amounts.length) continue;
     const positive = amounts.filter(a => a.value > 0);
     if (!positive.length) continue;
-    const lastAmt = positive[positive.length - 1];
-    const price = lastAmt.value;
 
-    let nameText = (l.text.slice(0, lastAmt.start) + l.text.slice(lastAmt.end))
+    // Stacked-strikethrough check (Zepto-style): this row is tight under
+    // the previously emitted item AND its amount exceeds that item's price
+    // → it's the previous card's MRP, not a new item.
+    if (lastEmitted) {
+      const prevRow = lastEmitted.row;
+      const gap = l.y - (prevRow.y + (prevRow.height || 22));
+      const thresh = (prevRow.height || l.height || 22) * 1.5;
+      const currMax = Math.max(...positive.map(a => a.value));
+      if (gap >= 0 && gap < thresh && currMax > lastEmitted.item.price) {
+        const ranges = positive.map(a => [a.start, a.end]);
+        const tail = stripRanges(l.text, ranges)
+          .replace(/[₹$€£¥]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        // Absorb the tail into the previous item's name only if it looks
+        // like a NAME continuation (e.g. "Putty | Leak Repair, Bonding &
+        // Gap Filling") — not a qty row ("1 pack (500 ml) · 1 unit").
+        // Cheap test: name lines start with a letter; qty lines start
+        // with a digit. looksLikeQtyOnly() catches the all-numeric case
+        // ("400 g x 1") but lets "1 pack (500 ml) · 1 unit" through
+        // because the parens + middot keep the cleaned residual > 3 chars.
+        const startsWithDigit = /^\s*\d/.test(tail);
+        if (tail && !startsWithDigit && /[a-z]/i.test(tail) && !looksLikeQtyOnly(tail)) {
+          const joined = `${lastEmitted.item.name} ${tail}`.replace(/\s+/g, ' ').slice(0, 60);
+          lastEmitted.item.name = joined;
+        }
+        continue;
+      }
+    }
+
+    // Same-row two-amount case (Blinkit-style): the smaller amount is the
+    // current price; the larger is the struck-through MRP. With only one
+    // amount, that one is the price.
+    let price;
+    if (positive.length >= 2) {
+      const sorted = positive.slice().sort((a, b) => a.value - b.value);
+      price = sorted[0].value;
+    } else {
+      price = positive[positive.length - 1].value;
+    }
+
+    // Strip ALL positive amounts from the name text — the card strategy
+    // previously stripped only the last, which let the MRP digits leak
+    // into the item name ("Mustard Seeds 200 g x 1 117").
+    const ranges = positive.map(a => [a.start, a.end]);
+    let nameText = stripRanges(l.text, ranges)
       .replace(/[₹$€£¥]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
     if (!nameText || looksLikeQtyOnly(nameText)) {
-      const back = findNameBackward(rows, i);
+      const back = findCardNamesBackward(rows, i);
       if (back) nameText = nameText ? `${back} ${nameText}` : back;
     }
     if (nameText && !/\d/.test(nameText)) {
@@ -544,7 +694,10 @@ function extractItemsCard(rows, bands) {
       hsn: extractHsn(l.text),
       gstRates: extractItemGstRates(l.text),
     });
-    if (item) out.push(item);
+    if (item) {
+      out.push(item);
+      lastEmitted = { item, row: l };
+    }
   }
   return out;
 }
@@ -563,6 +716,18 @@ function stripRanges(text, ranges) {
   return out;
 }
 
+// Convert a trailing bare integer ("Caffe Latte Grande 1") into the "x N"
+// multiplier form that normalize.js's TRAIL_MUL_RE will strip cleanly. Used
+// after findNameBackward fills in the product name from a row above —
+// otherwise the qty digit pulled in from the qty/price row leaks into the
+// final item name as "Caffe Latte Grande 1" / "Caffe Latte Grande Qty 1".
+function wrapTrailingQty(nameText) {
+  const m = nameText.match(/^(.+?)\s+(\d{1,2})\s*$/);
+  if (!m) return nameText;
+  if (/[x×*]\s*$/i.test(m[1])) return nameText;   // already has a multiplier
+  return `${m[1]} x ${m[2]}`;
+}
+
 function extractItemsTabular(rows, bands) {
   const out = [];
   const { itemBandTop, itemBandBottom } = bands;
@@ -570,6 +735,7 @@ function extractItemsTabular(rows, bands) {
     const l = rows[i];
     if (l.y < itemBandTop || l.y > itemBandBottom) continue;
     if (SKIP_RE.test(l.text)) continue;
+    if (rowHasNoOwnAlpha(l.text)) continue;   // see rowHasNoOwnAlpha doc-comment
     const amounts = matchAmounts(l.text);
     if (!amounts.length) continue;
     const positive = amounts.filter(a => a.value > 0);
@@ -591,9 +757,13 @@ function extractItemsTabular(rows, bands) {
 
     // Remove ALL amount tokens from the name. Use positions so we also strip
     // the decimal tail (.00) and any currency prefix consumed by the regex.
+    // Also strip the literal "Qty" / "Quantity" column label — café receipts
+    // (Starbucks card_coffee golden fixture) print "Qty 1   295.00" which
+    // would otherwise leave "Qty" trailing in the item name.
     const ranges = positive.map(a => [a.start, a.end]);
     let nameText = stripRanges(l.text, ranges)
       .replace(/[₹$€£¥]/g, '')
+      .replace(/\b(?:qty|quantity)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -621,6 +791,8 @@ function extractItemsTabular(rows, bands) {
       const back = findNameBackward(rows, i);
       if (back) nameText = nameText ? `${back} ${nameText}` : back;
     }
+
+    nameText = wrapTrailingQty(nameText);   // "Caffe Latte 1" → "Caffe Latte x 1"
 
     if (nameText.length < 2 || /^\d+$/.test(nameText)) continue;
 
@@ -1033,9 +1205,18 @@ function findBillBands(rows, totalY) {
     }
   }
 
+  // Items end at WHICHEVER section marker appears first — the bill-summary
+  // header OR the grand-total row. On most receipts the bill header comes
+  // first (items → "Bill details" → totals), but on Indian thermal POS
+  // receipts (Starbucks pre-GST) the order can be reversed: items →
+  // breakdown including "Rounded Off" → "PAYMENT DETAILS". Picking the
+  // header-only branch there would include the totals breakdown in the
+  // item band and emit "Card Amount" as a fake item.
   let itemBandBottom = maxY;
-  if (billHeaderY != null) itemBandBottom = billHeaderY - 1;
-  else if (totalY != null) itemBandBottom = totalY - 1;
+  const bottomCandidates = [];
+  if (billHeaderY != null) bottomCandidates.push(billHeaderY - 1);
+  if (totalY != null) bottomCandidates.push(totalY - 1);
+  if (bottomCandidates.length) itemBandBottom = Math.min(...bottomCandidates);
 
   return { itemBandTop, itemBandBottom, minY, maxY, rangeY };
 }
@@ -1111,7 +1292,7 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
   }
 
   // ── Merchant / currency / date / GSTIN / order id ────────────────────
-  const merchant = extractMerchant(rows, fd.brand, minY, rangeY);
+  const merchant = extractMerchant(rows, fd.brand, minY, rangeY, fd.format);
   const currency = detectCurrency(fullText);
   const date = findDate(fullText) || fallbackDate;
   const gstin = extractGstin(fullText);
@@ -1151,11 +1332,16 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
     delete it._combinedGstRate;
   }
 
-  // ── Fallback total: bottom-band scan if no total keyword found ───────
+  // ── Fallback total: subtotal → bottom-band scan → items sum ──────────
+  // Order matters. Quick-commerce screenshots are often cropped above the
+  // "Bill Total" line, so the only authoritative aggregate visible is the
+  // "Item Total" subtotal. Falling through to the bottom-band scan would
+  // pick the largest line-item amount instead, which is almost always wrong.
   let total = totals.total;
+  if (!isFinite(total) && isFinite(totals.subtotal) && totals.subtotal > 0) {
+    total = totals.subtotal;
+  }
   if (!isFinite(total)) {
-    const ys = rows.map(l => l.y);
-    const maxY = Math.max(...ys);
     const bottomBand = rows.filter(l => (l.y - minY) / rangeY > 0.60);
     let best = 0;
     for (const l of bottomBand) {

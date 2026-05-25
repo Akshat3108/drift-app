@@ -156,6 +156,12 @@ export const TOTAL_KEYWORDS = [
   'amount\\s*to\\s*pay',
   'net\\s*rs',
   'net\\s*amount',
+  // Indian thermal POS receipts print "Net Invoice Amount" (unrounded
+  // tax-inclusive total) AND "Rounded Off Invoice Amount" (final cash
+  // figure). Both forms classify as total via these patterns; restaurant /
+  // generic totalPriority prefers 'rounded off' when both are present.
+  'net\\s*invoice\\s*amount',
+  'rounded\\s*off',
   'total',
 ];
 
@@ -197,6 +203,10 @@ export const FEE_KEYWORDS = [
   'platform\\s*fee',
   'convenience\\s*fee',
   'processing\\s*fee',
+  // Amazon order-summary screens (Marketplace Fee = a flat ₹5 e-commerce
+  // platform charge). Without this, the parser misclassifies the row as
+  // an item and emits a fake "Marketplace Fee" @ ₹5.
+  'marketplace\\s*fee',
   'restaurant\\s*charges',
   'tip',
   'gratuity',
@@ -214,7 +224,12 @@ export const DISCOUNT_KEYWORDS = [
   'offer\\s*applied',
   'cashback',
   '\\bsav\\b',
-  '\\boff\\b',
+  // Bare '\boff\b' was previously here. It collided with "Rounded Off Invoice
+  // Amount" on Indian thermal POS receipts (Starbucks, McDonald's pre-GST),
+  // misclassifying the line as a discount and stealing it from TOTAL_RE.
+  // Real discount lines that just say "Rs 50 off" without a "discount" /
+  // "savings" / "promo" keyword are rare enough that the precision win is
+  // worth the lost coverage.
 ];
 
 // Metadata / non-line-item rows.
@@ -240,9 +255,12 @@ export const META_KEYWORDS = [
   'shipping\\s*address',
   'billing\\s*address',
   'customer\\s*name',
-  'mobile',
-  'phone',
-  'email',
+  // Mobile/phone/email need a `:` or `#` separator to count as meta —
+  // otherwise product names like "Phone Stand Adjustable" or "Mobile Cover"
+  // match and the whole row is dropped from item extraction.
+  'mobile\\s*[:#]',
+  'phone\\s*[:#]',
+  'email\\s*[:#]',
   'gstin',
   'fssai',
   'cin',
@@ -267,9 +285,17 @@ export const META_KEYWORDS = [
   'order\\s*summary',
   'order\\s*confirmed',
   'need\\s*help',
+  'get\\s*help',
   'thank\\s*you',
   'visit\\s*again',
   'chat\\s*with\\s*us',
+  // Quick-commerce app chrome (Zepto/Blinkit/Instamart order-detail screens).
+  // These rows have no semantic value but were getting picked up as the
+  // merchant fallback when the brand word itself wasn't on the screen.
+  'arrived\\s*at',
+  'download\\s*invoice',
+  'rate\\s*now',
+  'repeat\\s*order',
 ];
 
 // Headers that mark the start of the bill section (above-this = items area).
@@ -366,11 +392,21 @@ export const FORMAT_SIGNATURES = [
     label: 'Quick commerce',
     tests: [
       /\bblinkit\b|\bzepto\b|\binstamart\b|\bbb\s*now\b|\bdunzo\b/i,
-      /arriving\s+in\s+\d+\s*min/i,
-      /\bitems?\s+in\s+this\s+order\b/i,
-      /handling\s*charge/i,
+      // "Arriving in 12 min" (pre-delivery) AND "Arrived at 10:32 am" (post-delivery
+      // order-summary screen) both signal quick-commerce — order screenshots are
+      // usually taken AFTER the order arrived.
+      /\barriv(?:ing|ed)\s+(?:in|at)\b/i,
+      // Zepto's order-summary screen prints "8 items in order" (no "this");
+      // Blinkit prints "6 items in this order".
+      /\bitems?\s+in\s+(?:this\s+)?order\b/i,
+      // Both Zepto ("Handling Fee") and Blinkit ("Handling charge") variants.
+      /\bhandling\s*(?:charge|fee)\b/i,
       /\bmrp\b/i,
-      /bill\s*details/i,
+      // Blinkit's "Bill details" header AND Zepto's "Bill Summary" header.
+      /\bbill\s*(?:details|summary)\b/i,
+      // App-style order IDs: Zepto "Order #KVLKNSNO89005" or Blinkit "ORD13375839349".
+      /\border\s*#[A-Z0-9]{6,}/i,
+      /\bord\d{8,}\b/i,
     ],
   },
   {
@@ -519,8 +555,13 @@ const COLUMN_LABEL_META_KEYWORDS = new Set(['hsn', 'sac']);
 
 // Identifies rows that should never become items.
 // Catches: totals, subtotals, taxes, fees, discounts, metadata, bill headers.
+//
+// Word-boundary anchored — without `\b…\b`, short META stems like 'cin'
+// (Indian Corporate Identification Number, intended to skip "CIN: U12345"
+// rows) matched any substring "cin", silently dropping items like
+// "Short Capuccino" from extraction.
 export const SKIP_RE = new RegExp(
-  '(?:' + [
+  '\\b(?:' + [
     ...TOTAL_KEYWORDS,
     ...SUBTOTAL_KEYWORDS,
     ...TAX_KEYWORDS,
@@ -528,7 +569,7 @@ export const SKIP_RE = new RegExp(
     ...DISCOUNT_KEYWORDS,
     ...META_KEYWORDS.filter(k => !COLUMN_LABEL_META_KEYWORDS.has(k)),
     ...BILL_HEADER_KEYWORDS,
-  ].sort((a, b) => b.length - a.length).join('|') + ')',
+  ].sort((a, b) => b.length - a.length).join('|') + ')\\b',
   'i'
 );
 
@@ -599,11 +640,26 @@ export function looksLikeQtyOnly(text) {
   return cleaned.length < 3;
 }
 
+// Quick-commerce / e-commerce apps print bare "Order #KVLKNSNO89005" or
+// "ORD13375839349" rows that META_RE's whole-word \b anchors can't catch
+// because they end on `#` / contain only an alphanumeric blob. Match them
+// here so they're excluded from merchant-fallback candidates.
+const ORDER_HEADER_RE = /^\s*(?:order|invoice|bill|receipt)\s*[#:]?\s*[A-Z]{2,}[A-Z0-9]{4,}\s*$/i;
+
+// Counters like "8 items", "6 items in this order", "8 items in order" sit
+// above the item list on every quick-commerce / app order screen. They're
+// section headers, never item names — keep them out of merchant candidates
+// AND out of findCardNamesBackward (so the first item's name doesn't get
+// the counter prepended).
+const ITEMS_HEADER_RE = /^\s*\d+\s*items?\b/i;
+
 // True when the row's text strongly looks like a metadata row (no real item).
 export function looksLikeMetaOnly(text) {
   if (!text) return true;
   if (META_RE.test(text)) return true;
   if (GSTIN_RE.test(text)) return true;
   if (FSSAI_RE.test(text)) return true;
+  if (ORDER_HEADER_RE.test(text)) return true;
+  if (ITEMS_HEADER_RE.test(text)) return true;
   return false;
 }

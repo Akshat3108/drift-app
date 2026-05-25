@@ -1,0 +1,86 @@
+{
+  "name": "zepto_quick_commerce_order",
+  "notes": "Zepto 'Order #KVLKNSNO89005' summary screen with 8 items. Layout-specific signals: (a) strikethrough MRP STACKED on the row below the current price; (b) multi-line product names ('M-Seal ... Putty | Leak Repair, Bonding & Gap Filling', 'Del Monte ... Semolina'); (c) 'Bill Summary' header (not 'Bill details'); (d) 'Item Total ₹492 ₹327' with discount baked in; (e) waived fees printed as 'Delivery Fee ₹30 FREE' and 'Handling Fee ₹10 FREE' (₹30 / ₹10 are struck-through). Screenshot is cropped above the 'Bill Total' line, so the only post-discount aggregate visible is the Item Total — total should fall back to subtotal. No 'Zepto' word in the OCR text (it's only in the app logo), so merchant resolves to 'Unknown store'.",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Home"}
+  ],
+  "expected": {
+    "merchant": "Unknown store",
+    "total": 327,
+    "subtotal": 327,
+    "format": "quick_commerce",
+    "items": [
+      {"name": "M-Seal Phataphat Fast Curing Epoxy Putty | Leak Repair, Bond", "price": 28},
+      {"name": "Amul Gold Full Cream Fresh Milk | Pouch", "price": 32},
+      {"name": "Amul Garlic & Herbs Buttery Spread", "price": 70},
+      {"name": "Coca-Cola Soft Drink | Carbonated Beverage", "price": 35},
+      {"name": "Del Monte Food Craft Penne Rigate Semolina", "price": 76},
+      {"name": "Mountain Dew Citrus Soft Drink", "price": 36},
+      {"name": "Broccoli", "price": 35},
+      {"name": "Capsicum Green", "price": 15}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1440, "height": 3120},
+        "lines": [
+          {"text": "Order #KVLKNSNO89005", "frame": {"left": 200, "top": 95, "width": 700, "height": 40}, "elements": [{"text": "Order", "frame": {"left": 200, "width": 150}}, {"text": "#KVLKNSNO89005", "frame": {"left": 360, "width": 540}}]},
+          {"text": "8 items", "frame": {"left": 200, "top": 140, "width": 200, "height": 35}, "elements": [{"text": "8", "frame": {"left": 200, "width": 30}}, {"text": "items", "frame": {"left": 240, "width": 160}}]},
+          {"text": "Get Help", "frame": {"left": 1180, "top": 95, "width": 200, "height": 40}, "elements": [{"text": "Get", "frame": {"left": 1180, "width": 70}}, {"text": "Help", "frame": {"left": 1260, "width": 120}}]},
+          {"text": "8 items in order", "frame": {"left": 80, "top": 290, "width": 700, "height": 40}, "elements": [{"text": "8", "frame": {"left": 80, "width": 30}}, {"text": "items", "frame": {"left": 120, "width": 160}}, {"text": "in", "frame": {"left": 290, "width": 60}}, {"text": "order", "frame": {"left": 360, "width": 180}}]},
+
+          {"text": "M-Seal Phataphat 90g Fast Curing Epoxy", "frame": {"left": 200, "top": 395, "width": 900, "height": 40}, "elements": [{"text": "M-Seal", "frame": {"left": 200, "width": 140}}]},
+          {"text": "₹28", "frame": {"left": 1280, "top": 395, "width": 80, "height": 40}, "elements": [{"text": "₹28", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "Putty | Leak Repair, Bonding & Gap Filling", "frame": {"left": 200, "top": 445, "width": 900, "height": 40}, "elements": [{"text": "Putty", "frame": {"left": 200, "width": 110}}]},
+          {"text": "₹30", "frame": {"left": 1280, "top": 445, "width": 80, "height": 40}, "elements": [{"text": "₹30", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "100 g · 1 unit", "frame": {"left": 200, "top": 490, "width": 400, "height": 30}, "elements": [{"text": "100", "frame": {"left": 200, "width": 70}}, {"text": "g", "frame": {"left": 280, "width": 20}}, {"text": "1", "frame": {"left": 330, "width": 20}}, {"text": "unit", "frame": {"left": 360, "width": 80}}]},
+
+          {"text": "Amul Gold Full Cream Fresh Milk | Pouch", "frame": {"left": 200, "top": 605, "width": 900, "height": 40}, "elements": [{"text": "Amul", "frame": {"left": 200, "width": 100}}]},
+          {"text": "₹32", "frame": {"left": 1280, "top": 605, "width": 80, "height": 40}, "elements": [{"text": "₹32", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "1 pack (500 ml) · 1 unit", "frame": {"left": 200, "top": 655, "width": 500, "height": 30}, "elements": [{"text": "1", "frame": {"left": 200, "width": 20}}, {"text": "pack", "frame": {"left": 230, "width": 80}}]},
+          {"text": "₹36", "frame": {"left": 1280, "top": 655, "width": 80, "height": 40}, "elements": [{"text": "₹36", "frame": {"left": 1280, "width": 80}}]},
+
+          {"text": "Amul Garlic & Herbs Buttery Spread", "frame": {"left": 200, "top": 775, "width": 900, "height": 40}, "elements": [{"text": "Amul", "frame": {"left": 200, "width": 100}}]},
+          {"text": "₹70", "frame": {"left": 1280, "top": 775, "width": 80, "height": 40}, "elements": [{"text": "₹70", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "1 pack (100 g) · 1 unit", "frame": {"left": 200, "top": 820, "width": 500, "height": 30}, "elements": [{"text": "1", "frame": {"left": 200, "width": 20}}]},
+
+          {"text": "Coca-Cola Soft Drink | Carbonated Beverage", "frame": {"left": 200, "top": 945, "width": 900, "height": 40}, "elements": [{"text": "Coca-Cola", "frame": {"left": 200, "width": 200}}]},
+          {"text": "₹35", "frame": {"left": 1280, "top": 945, "width": 80, "height": 40}, "elements": [{"text": "₹35", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "1 pc (750 ml) · 1 unit", "frame": {"left": 200, "top": 990, "width": 500, "height": 30}, "elements": [{"text": "1", "frame": {"left": 200, "width": 20}}]},
+          {"text": "₹40", "frame": {"left": 1280, "top": 990, "width": 80, "height": 40}, "elements": [{"text": "₹40", "frame": {"left": 1280, "width": 80}}]},
+
+          {"text": "Del Monte Food Craft Penne Rigate", "frame": {"left": 200, "top": 1115, "width": 900, "height": 40}, "elements": [{"text": "Del", "frame": {"left": 200, "width": 70}}]},
+          {"text": "₹76", "frame": {"left": 1280, "top": 1115, "width": 80, "height": 40}, "elements": [{"text": "₹76", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "Semolina", "frame": {"left": 200, "top": 1165, "width": 400, "height": 40}, "elements": [{"text": "Semolina", "frame": {"left": 200, "width": 200}}]},
+          {"text": "₹178", "frame": {"left": 1280, "top": 1165, "width": 100, "height": 40}, "elements": [{"text": "₹178", "frame": {"left": 1280, "width": 100}}]},
+          {"text": "1 pack (400 g) · 1 unit", "frame": {"left": 200, "top": 1215, "width": 500, "height": 30}, "elements": [{"text": "1", "frame": {"left": 200, "width": 20}}]},
+
+          {"text": "Mountain Dew Citrus Soft Drink", "frame": {"left": 200, "top": 1340, "width": 900, "height": 40}, "elements": [{"text": "Mountain", "frame": {"left": 200, "width": 180}}]},
+          {"text": "₹36", "frame": {"left": 1280, "top": 1340, "width": 80, "height": 40}, "elements": [{"text": "₹36", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "1 pc (750 ml) · 1 unit", "frame": {"left": 200, "top": 1390, "width": 500, "height": 30}, "elements": [{"text": "1", "frame": {"left": 200, "width": 20}}]},
+          {"text": "₹40", "frame": {"left": 1280, "top": 1390, "width": 80, "height": 40}, "elements": [{"text": "₹40", "frame": {"left": 1280, "width": 80}}]},
+
+          {"text": "Broccoli", "frame": {"left": 200, "top": 1510, "width": 400, "height": 40}, "elements": [{"text": "Broccoli", "frame": {"left": 200, "width": 200}}]},
+          {"text": "₹35", "frame": {"left": 1280, "top": 1510, "width": 80, "height": 40}, "elements": [{"text": "₹35", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "300 - 500 g · 1 unit", "frame": {"left": 200, "top": 1555, "width": 500, "height": 30}, "elements": [{"text": "300", "frame": {"left": 200, "width": 70}}]},
+          {"text": "₹63", "frame": {"left": 1280, "top": 1555, "width": 80, "height": 40}, "elements": [{"text": "₹63", "frame": {"left": 1280, "width": 80}}]},
+
+          {"text": "Capsicum Green", "frame": {"left": 200, "top": 1675, "width": 400, "height": 40}, "elements": [{"text": "Capsicum", "frame": {"left": 200, "width": 200}}]},
+          {"text": "₹15", "frame": {"left": 1280, "top": 1675, "width": 80, "height": 40}, "elements": [{"text": "₹15", "frame": {"left": 1280, "width": 80}}]},
+          {"text": "2 pcs · 1 unit", "frame": {"left": 200, "top": 1720, "width": 400, "height": 30}, "elements": [{"text": "2", "frame": {"left": 200, "width": 20}}]},
+          {"text": "₹35", "frame": {"left": 1280, "top": 1720, "width": 80, "height": 40}, "elements": [{"text": "₹35", "frame": {"left": 1280, "width": 80}}]},
+
+          {"text": "Bill Summary", "frame": {"left": 80, "top": 1900, "width": 600, "height": 40}, "elements": []},
+          {"text": "Item Total", "frame": {"left": 80, "top": 1980, "width": 400, "height": 35}, "elements": []},
+          {"text": "₹492 ₹327", "frame": {"left": 1180, "top": 1980, "width": 200, "height": 35}, "elements": []},
+          {"text": "Delivery Fee", "frame": {"left": 80, "top": 2050, "width": 400, "height": 35}, "elements": []},
+          {"text": "₹30 FREE", "frame": {"left": 1180, "top": 2050, "width": 200, "height": 35}, "elements": []},
+          {"text": "Handling Fee", "frame": {"left": 80, "top": 2120, "width": 400, "height": 35}, "elements": []},
+          {"text": "₹10 FREE", "frame": {"left": 1180, "top": 2120, "width": 200, "height": 35}, "elements": []}
+        ]
+      }
+    ]
+  }
+}

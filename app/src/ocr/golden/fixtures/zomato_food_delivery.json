@@ -1,0 +1,68 @@
+{
+  "name": "zomato_food_delivery",
+  "notes": "Synthetic Zomato food-delivery order summary (Burger King, Sector 18 Noida → ₹560 total with ₹100 coupon discount). First fixture covering the food_delivery format bucket — exercises all 5 format signatures (zomato brand match, item total, platform fee, restaurant charges, delivery fee → confidence 1.0) and card-strategy item extraction with 'N x ItemName' prefix. Merchant resolves to 'Burger King' not 'Zomato' or 'Unknown store' because matchBrand picks the LONGEST KNOWN_BRANDS match ('Burger King' = 11 chars, 'Zomato' = 6 chars) — semantically correct: the user's expense is at Burger King, Zomato is the delivery channel. Bill section exercises the full fee/tax/discount triangulation: Restaurant Charges + Delivery Fee + Platform Fee → fees, GST (in TAX_KEYWORDS) before FEE_RE check so 'GST and Restaurant Charges ₹28' classifies as tax not fee, Coupon Applied → discount. Item-Total subtotal vs Total-Bill total disambiguated by SUBTOTAL_RE check ordering before TOTAL_RE. Notable: this fixture surfaced ZERO parser bugs — all structural fixes from prior fixtures (Zepto/Blinkit/Starbucks/Amazon) had already covered the patterns Zomato uses.",
+  "pots": [
+    {"id": 1, "name": "Food & Drink"},
+    {"id": 2, "name": "Eating Out"}
+  ],
+  "expected": {
+    "merchant": "Burger King",
+    "date": "2026-05-23",
+    "total": 560,
+    "subtotal": 562,
+    "format": "food_delivery",
+    "items": [
+      {"name": "Whopper Veg", "price": 398},
+      {"name": "Crispy Veg Burger", "price": 89},
+      {"name": "Coke", "price": 75}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 900, "height": 1400},
+        "lines": [
+          {"text": "Order Summary", "frame": {"left": 80, "top": 110, "width": 320, "height": 36}, "elements": [{"text": "Order Summary", "frame": {"left": 80, "width": 320}}]},
+
+          {"text": "Burger King", "frame": {"left": 80, "top": 220, "width": 240, "height": 36}, "elements": [{"text": "Burger", "frame": {"left": 80, "width": 110}}, {"text": "King", "frame": {"left": 200, "width": 120}}]},
+          {"text": "Sector 18, Noida", "frame": {"left": 80, "top": 260, "width": 260, "height": 28}, "elements": [{"text": "Sector 18, Noida", "frame": {"left": 80, "width": 260}}]},
+          {"text": "Delivered by Zomato", "frame": {"left": 80, "top": 300, "width": 300, "height": 28}, "elements": [{"text": "Delivered", "frame": {"left": 80, "width": 160}}, {"text": "by", "frame": {"left": 250, "width": 40}}, {"text": "Zomato", "frame": {"left": 300, "width": 100}}]},
+
+          {"text": "2 x Whopper Veg", "frame": {"left": 80, "top": 410, "width": 300, "height": 32}, "elements": [{"text": "2", "frame": {"left": 80, "width": 30}}, {"text": "x", "frame": {"left": 120, "width": 20}}, {"text": "Whopper", "frame": {"left": 150, "width": 130}}, {"text": "Veg", "frame": {"left": 290, "width": 80}}]},
+          {"text": "₹398", "frame": {"left": 700, "top": 410, "width": 100, "height": 32}, "elements": [{"text": "₹398", "frame": {"left": 700, "width": 100}}]},
+          {"text": "Veg Whopper, regular sauce", "frame": {"left": 80, "top": 450, "width": 400, "height": 26}, "elements": [{"text": "Veg Whopper, regular sauce", "frame": {"left": 80, "width": 400}}]},
+
+          {"text": "1 x Crispy Veg Burger", "frame": {"left": 80, "top": 520, "width": 360, "height": 32}, "elements": [{"text": "1", "frame": {"left": 80, "width": 30}}, {"text": "x", "frame": {"left": 120, "width": 20}}, {"text": "Crispy", "frame": {"left": 150, "width": 110}}, {"text": "Veg", "frame": {"left": 270, "width": 60}}, {"text": "Burger", "frame": {"left": 340, "width": 100}}]},
+          {"text": "₹89", "frame": {"left": 700, "top": 520, "width": 100, "height": 32}, "elements": [{"text": "₹89", "frame": {"left": 700, "width": 100}}]},
+          {"text": "Add lettuce", "frame": {"left": 80, "top": 560, "width": 200, "height": 26}, "elements": [{"text": "Add lettuce", "frame": {"left": 80, "width": 200}}]},
+
+          {"text": "1 x Coke", "frame": {"left": 80, "top": 620, "width": 200, "height": 32}, "elements": [{"text": "1", "frame": {"left": 80, "width": 30}}, {"text": "x", "frame": {"left": 120, "width": 20}}, {"text": "Coke", "frame": {"left": 150, "width": 130}}]},
+          {"text": "₹75", "frame": {"left": 700, "top": 620, "width": 100, "height": 32}, "elements": [{"text": "₹75", "frame": {"left": 700, "width": 100}}]},
+          {"text": "Chilled", "frame": {"left": 80, "top": 660, "width": 140, "height": 26}, "elements": [{"text": "Chilled", "frame": {"left": 80, "width": 140}}]},
+
+          {"text": "Bill Details", "frame": {"left": 80, "top": 770, "width": 240, "height": 36}, "elements": [{"text": "Bill Details", "frame": {"left": 80, "width": 240}}]},
+
+          {"text": "Item Total", "frame": {"left": 80, "top": 830, "width": 220, "height": 28}, "elements": [{"text": "Item Total", "frame": {"left": 80, "width": 220}}]},
+          {"text": "₹562", "frame": {"left": 700, "top": 830, "width": 100, "height": 28}, "elements": [{"text": "₹562", "frame": {"left": 700, "width": 100}}]},
+          {"text": "Restaurant Charges", "frame": {"left": 80, "top": 870, "width": 320, "height": 28}, "elements": [{"text": "Restaurant Charges", "frame": {"left": 80, "width": 320}}]},
+          {"text": "₹15", "frame": {"left": 700, "top": 870, "width": 80, "height": 28}, "elements": [{"text": "₹15", "frame": {"left": 700, "width": 80}}]},
+          {"text": "Delivery Fee", "frame": {"left": 80, "top": 910, "width": 220, "height": 28}, "elements": [{"text": "Delivery Fee", "frame": {"left": 80, "width": 220}}]},
+          {"text": "₹49", "frame": {"left": 700, "top": 910, "width": 80, "height": 28}, "elements": [{"text": "₹49", "frame": {"left": 700, "width": 80}}]},
+          {"text": "Platform Fee", "frame": {"left": 80, "top": 950, "width": 220, "height": 28}, "elements": [{"text": "Platform Fee", "frame": {"left": 80, "width": 220}}]},
+          {"text": "₹6", "frame": {"left": 700, "top": 950, "width": 60, "height": 28}, "elements": [{"text": "₹6", "frame": {"left": 700, "width": 60}}]},
+          {"text": "GST and Restaurant Charges", "frame": {"left": 80, "top": 990, "width": 460, "height": 28}, "elements": [{"text": "GST and Restaurant Charges", "frame": {"left": 80, "width": 460}}]},
+          {"text": "₹28", "frame": {"left": 700, "top": 990, "width": 80, "height": 28}, "elements": [{"text": "₹28", "frame": {"left": 700, "width": 80}}]},
+          {"text": "Coupon Applied (FIRSTORDER)", "frame": {"left": 80, "top": 1030, "width": 460, "height": 28}, "elements": [{"text": "Coupon Applied (FIRSTORDER)", "frame": {"left": 80, "width": 460}}]},
+          {"text": "-₹100", "frame": {"left": 700, "top": 1030, "width": 100, "height": 28}, "elements": [{"text": "-₹100", "frame": {"left": 700, "width": 100}}]},
+
+          {"text": "Total Bill", "frame": {"left": 80, "top": 1085, "width": 200, "height": 32}, "elements": [{"text": "Total Bill", "frame": {"left": 80, "width": 200}}]},
+          {"text": "₹560", "frame": {"left": 700, "top": 1085, "width": 100, "height": 32}, "elements": [{"text": "₹560", "frame": {"left": 700, "width": 100}}]},
+
+          {"text": "Paid via UPI: akshat@upi", "frame": {"left": 80, "top": 1180, "width": 380, "height": 28}, "elements": [{"text": "Paid via UPI: akshat@upi", "frame": {"left": 80, "width": 380}}]},
+          {"text": "Order placed 23 May 2026, 7:42 pm", "frame": {"left": 80, "top": 1220, "width": 540, "height": 28}, "elements": [{"text": "Order placed 23 May 2026, 7:42 pm", "frame": {"left": 80, "width": 540}}]},
+          {"text": "Order ID: 7723451234", "frame": {"left": 80, "top": 1260, "width": 360, "height": 28}, "elements": [{"text": "Order ID: 7723451234", "frame": {"left": 80, "width": 360}}]}
+        ]
+      }
+    ]
+  }
+}

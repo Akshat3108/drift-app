@@ -1,0 +1,52 @@
+{
+  "name": "amazon_online_retail",
+  "notes": "Synthetic Amazon India tax invoice (single page, 2 items, ₹1,138 total including ₹40 shipping). Exercises the online_retail pipeline: format detection via 5 signature regexes (amazon brand, sold by, shipping charges, grand total, tax invoice → confidence 1.0), 'tabular → columnar' item extraction with Sl.No/Qty intermediate numeric columns that should be promoted to qtyHint (or dropped) instead of leaking into the item name, and Grand Total / Shipping Charges / Subtotal classification. Regression-tracks a fix to META_KEYWORDS' bare 'phone'/'mobile'/'email' stems — without the `:`/`#` suffix requirement, 'Phone Stand Adjustable' matches META, gets caught by SKIP_RE, and the row drops out of item extraction entirely. Same class of bug as the earlier SKIP_RE word-boundary fix that affected 'Capuccino' (cin substring).",
+  "pots": [
+    {"id": 1, "name": "Shopping"},
+    {"id": 2, "name": "Home"}
+  ],
+  "expected": {
+    "merchant": "Amazon",
+    "date": "2026-05-22",
+    "total": 1138,
+    "format": "online_retail",
+    "items": [
+      {"name": "Wireless Mouse Black", "price": 599},
+      {"name": "Phone Stand Adjustable", "price": 499}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1100, "height": 900},
+        "lines": [
+          {"text": "amazon.in", "frame": {"left": 400, "top": 60, "width": 200, "height": 36}, "elements": [{"text": "amazon.in", "frame": {"left": 400, "width": 200}}]},
+
+          {"text": "Tax Invoice/Bill of Supply/Cash Memo", "frame": {"left": 240, "top": 110, "width": 520, "height": 28}, "elements": [{"text": "Tax", "frame": {"left": 240, "width": 60}}, {"text": "Invoice/Bill", "frame": {"left": 310, "width": 180}}, {"text": "of", "frame": {"left": 500, "width": 40}}, {"text": "Supply/Cash", "frame": {"left": 550, "width": 160}}, {"text": "Memo", "frame": {"left": 720, "width": 80}}]},
+
+          {"text": "Sold By: Cloudtail India Private Limited", "frame": {"left": 80, "top": 170, "width": 540, "height": 28}, "elements": [{"text": "Sold", "frame": {"left": 80, "width": 80}}, {"text": "By:", "frame": {"left": 170, "width": 50}}, {"text": "Cloudtail", "frame": {"left": 230, "width": 140}}, {"text": "India", "frame": {"left": 380, "width": 90}}, {"text": "Private", "frame": {"left": 480, "width": 110}}, {"text": "Limited", "frame": {"left": 600, "width": 100}}]},
+          {"text": "GSTIN: 29AABCD1234E1Z5", "frame": {"left": 80, "top": 200, "width": 400, "height": 28}, "elements": [{"text": "GSTIN:", "frame": {"left": 80, "width": 90}}, {"text": "29AABCD1234E1Z5", "frame": {"left": 180, "width": 320}}]},
+
+          {"text": "Order Number: 405-1234567-8901234", "frame": {"left": 80, "top": 260, "width": 540, "height": 28}, "elements": [{"text": "Order", "frame": {"left": 80, "width": 90}}, {"text": "Number:", "frame": {"left": 180, "width": 120}}, {"text": "405-1234567-8901234", "frame": {"left": 310, "width": 320}}]},
+          {"text": "Order Date: 22.05.2026", "frame": {"left": 80, "top": 290, "width": 360, "height": 28}, "elements": [{"text": "Order", "frame": {"left": 80, "width": 90}}, {"text": "Date:", "frame": {"left": 180, "width": 90}}, {"text": "22.05.2026", "frame": {"left": 280, "width": 200}}]},
+          {"text": "Invoice Number: IN-BLR-12345", "frame": {"left": 600, "top": 260, "width": 380, "height": 28}, "elements": [{"text": "Invoice", "frame": {"left": 600, "width": 120}}, {"text": "Number:", "frame": {"left": 730, "width": 120}}, {"text": "IN-BLR-12345", "frame": {"left": 860, "width": 240}}]},
+          {"text": "Invoice Date: 22.05.2026", "frame": {"left": 600, "top": 290, "width": 360, "height": 28}, "elements": [{"text": "Invoice", "frame": {"left": 600, "width": 120}}, {"text": "Date:", "frame": {"left": 730, "width": 90}}, {"text": "22.05.2026", "frame": {"left": 830, "width": 200}}]},
+
+          {"text": "Description          Qty  Unit Price  Total", "frame": {"left": 80, "top": 410, "width": 900, "height": 28}, "elements": [{"text": "Description", "frame": {"left": 80, "width": 180}}, {"text": "Qty", "frame": {"left": 600, "width": 50}}, {"text": "Unit", "frame": {"left": 690, "width": 60}}, {"text": "Price", "frame": {"left": 760, "width": 80}}, {"text": "Total", "frame": {"left": 870, "width": 80}}]},
+
+          {"text": "Wireless Mouse Black    1    599.00   599.00", "frame": {"left": 80, "top": 460, "width": 900, "height": 28}, "elements": [{"text": "Wireless", "frame": {"left": 80, "width": 150}}, {"text": "Mouse", "frame": {"left": 240, "width": 100}}, {"text": "Black", "frame": {"left": 350, "width": 100}}, {"text": "1", "frame": {"left": 615, "width": 30}}, {"text": "599.00", "frame": {"left": 720, "width": 100}}, {"text": "599.00", "frame": {"left": 870, "width": 100}}]},
+
+          {"text": "Phone Stand Adjustable  1    499.00   499.00", "frame": {"left": 80, "top": 500, "width": 900, "height": 28}, "elements": [{"text": "Phone", "frame": {"left": 80, "width": 100}}, {"text": "Stand", "frame": {"left": 190, "width": 100}}, {"text": "Adjustable", "frame": {"left": 300, "width": 160}}, {"text": "1", "frame": {"left": 615, "width": 30}}, {"text": "499.00", "frame": {"left": 720, "width": 100}}, {"text": "499.00", "frame": {"left": 870, "width": 100}}]},
+
+          {"text": "Subtotal:                          1,098.00", "frame": {"left": 80, "top": 560, "width": 900, "height": 28}, "elements": [{"text": "Subtotal:", "frame": {"left": 80, "width": 140}}, {"text": "1,098.00", "frame": {"left": 850, "width": 120}}]},
+          {"text": "Shipping Charges:                     40.00", "frame": {"left": 80, "top": 595, "width": 900, "height": 28}, "elements": [{"text": "Shipping", "frame": {"left": 80, "width": 140}}, {"text": "Charges:", "frame": {"left": 230, "width": 130}}, {"text": "40.00", "frame": {"left": 870, "width": 100}}]},
+          {"text": "Grand Total:                       1,138.00", "frame": {"left": 80, "top": 630, "width": 900, "height": 28}, "elements": [{"text": "Grand", "frame": {"left": 80, "width": 100}}, {"text": "Total:", "frame": {"left": 190, "width": 100}}, {"text": "1,138.00", "frame": {"left": 850, "width": 120}}]},
+
+          {"text": "Amount in Words: One Thousand One Hundred Thirty Eight Rupees Only", "frame": {"left": 80, "top": 690, "width": 900, "height": 28}, "elements": [{"text": "Amount in Words: One Thousand One Hundred Thirty Eight Rupees Only", "frame": {"left": 80, "width": 900}}]},
+          {"text": "For Cloudtail India Private Limited", "frame": {"left": 540, "top": 750, "width": 400, "height": 28}, "elements": [{"text": "For Cloudtail India Private Limited", "frame": {"left": 540, "width": 400}}]},
+          {"text": "Authorised Signatory", "frame": {"left": 580, "top": 790, "width": 320, "height": 28}, "elements": [{"text": "Authorised Signatory", "frame": {"left": 580, "width": 320}}]}
+        ]
+      }
+    ]
+  }
+}

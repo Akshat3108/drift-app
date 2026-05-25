@@ -1,0 +1,50 @@
+{
+  "name": "mandi_house_produce",
+  "notes": "Real thermal-printed MANOJ HOUSE sabzi-mandi receipt (Noida, BILL 125, 19/05/26 21:16:31). 7 produce items by weight, NET ₹286. Layout signature: 'ITEM NAME  QTY/WT  @RATE  AMT Rs.' header + 'NET Rs.' footer — the canonical mandi format triggering ALL 5 mandi signature regexes in patterns.js (qty/wt, @rate, amt rs, net rs, item name) → format=mandi @ confidence 1.0. Each item row carries decimal-kg qty so deriveQtyFromRate emits unit='kg' (e.g. APPLE KINNU 0.615 × ₹240.00 = ₹147.60). Exists to (a) regression-protect the qty×rate=amount weight-snap path for produce; (b) confirm the new SKIP_RE \\b…\\b word-boundary fix doesn't break the mandi parser (it doesn't — this receipt carries no HSN/CIN/SAC tokens).",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Produce"}
+  ],
+  "expected": {
+    "merchant": "MANOJ HOUSE",
+    "date": "2026-05-19",
+    "total": 286,
+    "format": "mandi",
+    "items": [
+      {"name": "APPLE KINNU", "price": 147.60},
+      {"name": "GUAVA WHITE", "price": 16.20},
+      {"name": "SHIMLA", "price": 14.22},
+      {"name": "ROMA", "price": 26.86},
+      {"name": "POTATO PAH", "price": 23.55},
+      {"name": "CUCUMBER H", "price": 35.25},
+      {"name": "TOMATO HB", "price": 22.40}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1000, "height": 800},
+        "lines": [
+          {"text": "MANOJ HOUSE", "frame": {"left": 380, "top": 60, "width": 280, "height": 36}, "elements": [{"text": "MANOJ", "frame": {"left": 380, "width": 120}}, {"text": "HOUSE", "frame": {"left": 520, "width": 140}}]},
+          {"text": "NOIDA", "frame": {"left": 460, "top": 100, "width": 80, "height": 28}, "elements": [{"text": "NOIDA", "frame": {"left": 460, "width": 80}}]},
+          {"text": "BILL: 125  19/05/26 21:16:31", "frame": {"left": 100, "top": 150, "width": 800, "height": 28}, "elements": [{"text": "BILL:", "frame": {"left": 100, "width": 70}}, {"text": "125", "frame": {"left": 200, "width": 42}}, {"text": "19/05/26", "frame": {"left": 280, "width": 200}}, {"text": "21:16:31", "frame": {"left": 500, "width": 200}}]},
+
+          {"text": "ITEM NAME    QTY/WT  @RATE  AMT Rs.", "frame": {"left": 60, "top": 200, "width": 900, "height": 28}, "elements": [{"text": "ITEM", "frame": {"left": 60, "width": 56}}, {"text": "NAME", "frame": {"left": 130, "width": 90}}, {"text": "QTY/WT", "frame": {"left": 500, "width": 84}}, {"text": "@RATE", "frame": {"left": 650, "width": 70}}, {"text": "AMT", "frame": {"left": 800, "width": 42}}, {"text": "Rs.", "frame": {"left": 880, "width": 42}}]},
+
+          {"text": "APPLE KINNU  0.615  240.00  147.60", "frame": {"left": 60, "top": 250, "width": 900, "height": 28}, "elements": [{"text": "APPLE", "frame": {"left": 60, "width": 80}}, {"text": "KINNU", "frame": {"left": 150, "width": 80}}, {"text": "0.615", "frame": {"left": 500, "width": 90}}, {"text": "240.00", "frame": {"left": 650, "width": 90}}, {"text": "147.60", "frame": {"left": 850, "width": 90}}]},
+          {"text": "GUAVA WHITE  0.135  120.00  16.20", "frame": {"left": 60, "top": 285, "width": 900, "height": 28}, "elements": [{"text": "GUAVA", "frame": {"left": 60, "width": 80}}, {"text": "WHITE", "frame": {"left": 150, "width": 80}}, {"text": "0.135", "frame": {"left": 500, "width": 90}}, {"text": "120.00", "frame": {"left": 650, "width": 90}}, {"text": "16.20", "frame": {"left": 850, "width": 90}}]},
+          {"text": "SHIMLA  0.180  79.10  14.22", "frame": {"left": 60, "top": 320, "width": 900, "height": 28}, "elements": [{"text": "SHIMLA", "frame": {"left": 60, "width": 80}}, {"text": "0.180", "frame": {"left": 500, "width": 90}}, {"text": "79.10", "frame": {"left": 650, "width": 90}}, {"text": "14.22", "frame": {"left": 850, "width": 90}}]},
+          {"text": "ROMA  0.135  199.00  26.86", "frame": {"left": 60, "top": 355, "width": 900, "height": 28}, "elements": [{"text": "ROMA", "frame": {"left": 60, "width": 80}}, {"text": "0.135", "frame": {"left": 500, "width": 90}}, {"text": "199.00", "frame": {"left": 650, "width": 90}}, {"text": "26.86", "frame": {"left": 850, "width": 90}}]},
+          {"text": "POTATO PAH  0.785  30.00  23.55", "frame": {"left": 60, "top": 390, "width": 900, "height": 28}, "elements": [{"text": "POTATO", "frame": {"left": 60, "width": 90}}, {"text": "PAH", "frame": {"left": 150, "width": 60}}, {"text": "0.785", "frame": {"left": 500, "width": 90}}, {"text": "30.00", "frame": {"left": 650, "width": 90}}, {"text": "23.55", "frame": {"left": 850, "width": 90}}]},
+          {"text": "CUCUMBER H  0.705  50.00  35.25", "frame": {"left": 60, "top": 425, "width": 900, "height": 28}, "elements": [{"text": "CUCUMBER", "frame": {"left": 60, "width": 130}}, {"text": "H", "frame": {"left": 200, "width": 30}}, {"text": "0.705", "frame": {"left": 500, "width": 90}}, {"text": "50.00", "frame": {"left": 650, "width": 90}}, {"text": "35.25", "frame": {"left": 850, "width": 90}}]},
+          {"text": "TOMATO HB  0.560  40.00  22.40", "frame": {"left": 60, "top": 460, "width": 900, "height": 28}, "elements": [{"text": "TOMATO", "frame": {"left": 60, "width": 90}}, {"text": "HB", "frame": {"left": 160, "width": 42}}, {"text": "0.560", "frame": {"left": 500, "width": 90}}, {"text": "40.00", "frame": {"left": 650, "width": 90}}, {"text": "22.40", "frame": {"left": 850, "width": 90}}]},
+
+          {"text": "VAT @ 0.00              286.00", "frame": {"left": 60, "top": 520, "width": 900, "height": 28}, "elements": [{"text": "VAT", "frame": {"left": 60, "width": 42}}, {"text": "@", "frame": {"left": 130, "width": 30}}, {"text": "0.00", "frame": {"left": 170, "width": 80}}, {"text": "286.00", "frame": {"left": 800, "width": 200}}]},
+          {"text": "ROUND OFF", "frame": {"left": 60, "top": 555, "width": 200, "height": 28}, "elements": [{"text": "ROUND", "frame": {"left": 60, "width": 90}}, {"text": "OFF", "frame": {"left": 160, "width": 56}}]},
+          {"text": "NET Rs.                  286.00", "frame": {"left": 60, "top": 600, "width": 900, "height": 28}, "elements": [{"text": "NET", "frame": {"left": 60, "width": 42}}, {"text": "Rs.", "frame": {"left": 130, "width": 80}}, {"text": "286.00", "frame": {"left": 800, "width": 200}}]},
+          {"text": "Thanks for buying.", "frame": {"left": 280, "top": 680, "width": 380, "height": 28}, "elements": [{"text": "Thanks for buying.", "frame": {"left": 280, "width": 380}}]}
+        ]
+      }
+    ]
+  }
+}

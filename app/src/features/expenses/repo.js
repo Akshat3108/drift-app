@@ -409,16 +409,23 @@ export const expenses = {
     // Reads from monthly_summary rollup (3.19). The rollup is maintained
     // soft-delete-aware by triggers in v12, so no deleted_at predicate is
     // needed on the rollup side. The categories side still filters live rows.
+    // 7.10 — LEFT JOIN budget_rollover so `rollover_in` is surfaced on each
+    // pot row. NULL when no carryover row exists for the (category, month).
     return all(
       `SELECT c.id, c.name, c.emoji, c.color, c.budget, c.sort_order,
-              COALESCE(ms.total, 0) AS spent
+              c.rollover_enabled,
+              COALESCE(ms.total, 0) AS spent,
+              COALESCE(br.rollover_in, 0) AS rollover_in
        FROM categories c
        LEFT JOIN monthly_summary ms
               ON ms.category_id = c.id
              AND ms.month_key   = ?
+       LEFT JOIN budget_rollover br
+              ON br.category_id = c.id
+             AND br.month_key   = ?
        WHERE ${NOT_DELETED_C}
        ORDER BY c.sort_order, c.id`,
-      [m]
+      [m, m]
     );
   },
 

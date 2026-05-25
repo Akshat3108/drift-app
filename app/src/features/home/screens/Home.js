@@ -7,6 +7,7 @@ import { potBg } from '../../../theme';
 import { logError } from '@core/utils/log';
 import { formatShort, shorten, daysUntilLabel } from '@core/utils/format';
 import { useHomeDashboard } from '../useHomeDashboard';
+import ExpectedThisMonth from '../components/ExpectedThisMonth';
 
 function Home({ navigation }) {
   const { F, sym, profile, pots, expenses, totalSpend, totalIncome, monthBudget, refresh } = useApp();
@@ -293,6 +294,10 @@ function Home({ navigation }) {
           <Text style={{ fontSize: 18, color: F.ink3 }}>›</Text>
         </TouchableOpacity>
       )}
+
+      {/* 7.11 — Expected this month: surfaces detected recurring expenses with
+          inline log/view affordances. Renders nothing on fresh installs. */}
+      <ExpectedThisMonth navigation={navigation} />
 
       {expenses.length > 0 && (
         <>

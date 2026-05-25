@@ -945,6 +945,216 @@ CREATE INDEX IF NOT EXISTS idx_pantry_low_stock
   WHERE deleted_at IS NULL AND reorder_threshold IS NOT NULL;
 `;
 
+// v33 — Phase 4 / 7.8 Item price alerts.
+// `price_alerts` is a thin user-owned watchlist keyed by `normalized_name`
+// (same canonical key receipt_items + item_summary + pantry_items use). A
+// row may set `ceiling_price` (absolute trigger) and/or `jump_pct` (percent
+// jump vs. `baseline_price`). Both NULL with `enabled=1` is allowed by the
+// schema — the checker just silently skips such rows — so the UI is free
+// to create a row first, ask for thresholds second.
+//
+// `baseline_price` is stamped at create time from `item_summary.last_unit_price`
+// so a fresh alert has a meaningful anchor. The checker updates it (via
+// `markFired`) after a fire so subsequent jumps are measured from the new peak.
+// NULL baseline_price means "no anchor yet" — the jump branch is skipped.
+//
+// Soft-deleted rows are preserved as history. Partial UNIQUE on
+// `normalized_name WHERE deleted_at IS NULL` enforces one live alert per
+// canonical item while leaving deleted rows intact for audit.
+const V33_SQL = `
+CREATE TABLE IF NOT EXISTS price_alerts (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  normalized_name   TEXT NOT NULL,
+  display_name      TEXT NOT NULL,
+  ceiling_price     REAL,
+  jump_pct          REAL,
+  baseline_price    REAL,
+  enabled           INTEGER NOT NULL DEFAULT 1,
+  last_fired_at     TEXT,
+  last_fired_price  REAL,
+  notes             TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at        TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_price_alerts_name_live
+  ON price_alerts(normalized_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_price_alerts_active
+  ON price_alerts(normalized_name, enabled) WHERE deleted_at IS NULL;
+`;
+
+// v34 — Phase 4 / 7.9 Split expenses.
+// `people` is a small reference table (one row per friend / flatmate / colleague
+// the user splits expenses with). NOCASE-collated UNIQUE-when-live mirrors the
+// 7.3 tags pattern — soft-deleting a person frees the name for re-use.
+//
+// `expense_splits` is the M:N join — when the user pays for a shared expense,
+// one row per (expense, person) records how much of the total that person owes
+// back. CASCADE both ways: hard-deleting an expense (resetAll path today)
+// removes its splits; soft-deleting a person via the people screen orphans the
+// splits but the unsoftdeleted-people-only balances query filters them out.
+// Hard-delete of a person via resetAll cascades through to splits.
+//
+// Composite UNIQUE on (expense_id, person_id) prevents accidental double-rows
+// for the same person on the same expense. The reverse-direction index covers
+// the balances-per-person rollup query.
+const V34_SQL = `
+CREATE TABLE IF NOT EXISTS people (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL COLLATE NOCASE,
+  emoji       TEXT NOT NULL DEFAULT '👤',
+  color       TEXT NOT NULL DEFAULT '#888',
+  notes       TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_people_name_live
+  ON people(name COLLATE NOCASE) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS expense_splits (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  expense_id  INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  person_id   INTEGER NOT NULL REFERENCES people(id)   ON DELETE CASCADE,
+  amount      REAL NOT NULL CHECK (amount > 0),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_split_expense_person
+  ON expense_splits(expense_id, person_id);
+CREATE INDEX IF NOT EXISTS idx_splits_person
+  ON expense_splits(person_id);
+`;
+
+// v35 — Phase 4 / 7.10 Rollover budgets.
+// Per-category opt-in carryover. `categories.rollover_enabled` is the toggle
+// that EditPot exposes; rows default to 0 so this migration is a no-op on
+// every existing install.
+//
+// `budget_rollover` is the per-(category, month) carryover state. Computed
+// lazily by `rolloverRepo.ensureRolloverForMonth(monthKey)` which the pots
+// read path invokes before the SELECT. The compute rule:
+//   rollover_in(M) = (budget + rollover_in(M-1)) - spend(M-1)
+// Skipped when prev month has no monthly_summary row AND no budget_rollover
+// row (avoids gifting a full extra budget to fresh installs / brand-new
+// categories). INSERT OR REPLACE keeps the recompute idempotent and gives
+// retroactive edits to prior-month expenses a path to flow forward — every
+// pots() call re-derives the current row from the freshest prev-month state.
+//
+// FK CASCADE on category_id ensures resetAll wipes carryover rows alongside
+// their parent category. The month_key index covers the resetAll wipe and
+// any future "show me all rollovers this month" rollup.
+const V35_SQL = `
+CREATE TABLE IF NOT EXISTS budget_rollover (
+  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  month_key   TEXT NOT NULL,
+  rollover_in REAL NOT NULL DEFAULT 0,
+  computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (category_id, month_key)
+);
+CREATE INDEX IF NOT EXISTS idx_rollover_month ON budget_rollover(month_key);
+
+ALTER TABLE categories ADD COLUMN rollover_enabled INTEGER NOT NULL DEFAULT 0;
+`;
+
+// v36 — Phase 4 / 7.12 Utility bill tracking.
+// Two related tables:
+//   - utility_accounts: one row per recurring utility the user pays
+//     (electricity / gas / water / internet / mobile / dth / other). Like
+//     vehicles in 7.6, the kind is enum-CHECK'd at write time. billing_day
+//     is the anchor day used for projecting next-bill dates; capped 1..28
+//     to dodge Feb edge cases (same convention as emi_loans.bill_day).
+//   - utility_bills: per-billing-period row with consumption + rate trend
+//     columns (all NULL-able since not every provider exposes them) plus
+//     `total` REAL NOT NULL for the actual amount paid. `expense_id` is a
+//     UNIQUE FK to expenses — one bill ↔ one expense — and the atomic
+//     dual-write `billsRepo.addBill` mirrors 7.6's fuelfillups pattern so
+//     the two rows can't drift.
+//
+// Partial idx `idx_utility_bills_account_period` covers the per-account
+// trend query path (ORDER BY period_end DESC for the bills history list +
+// the consumption chart series). Reverse-index on expense_id covers the
+// "is this expense linked to a bill?" lookup the EditExpense surface
+// might want later.
+const V36_SQL = `
+CREATE TABLE IF NOT EXISTS utility_accounts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,
+  kind            TEXT NOT NULL CHECK (kind IN ('electricity','gas','water','internet','mobile','dth','other')),
+  provider        TEXT,
+  account_number  TEXT,
+  icon            TEXT NOT NULL DEFAULT '💡',
+  color           TEXT NOT NULL DEFAULT '#888',
+  billing_day     INTEGER CHECK (billing_day IS NULL OR (billing_day >= 1 AND billing_day <= 28)),
+  notes           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_utility_accounts_live
+  ON utility_accounts(kind) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS utility_bills (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  utility_account_id  INTEGER NOT NULL REFERENCES utility_accounts(id) ON DELETE CASCADE,
+  period_start        TEXT NOT NULL,
+  period_end          TEXT NOT NULL,
+  units_consumed      REAL,
+  rate_per_unit       REAL,
+  base_charge         REAL,
+  taxes               REAL,
+  total               REAL NOT NULL,
+  due_date            TEXT,
+  expense_id          INTEGER UNIQUE REFERENCES expenses(id) ON DELETE CASCADE,
+  notes               TEXT,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_utility_bills_account_period
+  ON utility_bills(utility_account_id, period_end DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_utility_bills_expense
+  ON utility_bills(expense_id);
+`;
+
+// v37 — Phase 4 / 7.13 Net-worth snapshots.
+// One row per local day. `ensureTodaySnapshot()` is called by AccountsProvider
+// on boot + after every account mutation; it computes
+//   total_assets      = SUM(balance) WHERE kind='asset' AND deleted_at IS NULL
+//   total_liabilities = SUM(balance) WHERE kind='liability' AND deleted_at IS NULL
+//   net               = total_assets - total_liabilities
+// and INSERT OR REPLACEs on `snapshot_date`. Idempotent — multiple computes
+// the same day overwrite; later edits land cleanly. The chart query orders
+// by snapshot_date ASC and the descending index covers a "last N days"
+// LIMIT path.
+const V37_SQL = `
+CREATE TABLE IF NOT EXISTS account_snapshots (
+  snapshot_date     TEXT PRIMARY KEY,
+  total_assets      REAL NOT NULL DEFAULT 0,
+  total_liabilities REAL NOT NULL DEFAULT 0,
+  net               REAL NOT NULL DEFAULT 0,
+  computed_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_date_desc
+  ON account_snapshots(snapshot_date DESC);
+`;
+
+// v38 — Phase 4 / 7.15 CSV import audit log.
+// One row per CSV import attempt. `total_rows` counts parsed rows, irrespective
+// of whether the user kept them; `imported_rows` counts the rows that landed
+// in expenses (excludes user-skipped + dedupe-flagged-and-skipped); `skipped_rows`
+// counts the rest. `format` enumerates 'hdfc' / 'sbi' / 'icici_cc' / 'unknown'.
+// `filename` is best-effort — expo-document-picker exposes a name but not a path.
+const V38_SQL = `
+CREATE TABLE IF NOT EXISTS csv_imports (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  format          TEXT NOT NULL,
+  filename        TEXT,
+  imported_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  total_rows      INTEGER NOT NULL DEFAULT 0,
+  imported_rows   INTEGER NOT NULL DEFAULT 0,
+  skipped_rows    INTEGER NOT NULL DEFAULT 0,
+  notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_csv_imports_date
+  ON csv_imports(imported_at DESC);
+`;
+
 // v29 — Phase 4 / 7.3 tags.
 // `tags` is a small user-owned reference table with case-insensitive
 // uniqueness (NOCASE collation + partial UNIQUE WHERE deleted_at IS NULL),
@@ -1217,6 +1427,36 @@ export const migrations = [
     name: 'pantry-items',
     up: async (db) => { await db.execAsync(V32_SQL); },
   },
+  {
+    version: 33,
+    name: 'price-alerts',
+    up: async (db) => { await db.execAsync(V33_SQL); },
+  },
+  {
+    version: 34,
+    name: 'people-and-expense-splits',
+    up: async (db) => { await db.execAsync(V34_SQL); },
+  },
+  {
+    version: 35,
+    name: 'budget-rollover',
+    up: async (db) => { await db.execAsync(V35_SQL); },
+  },
+  {
+    version: 36,
+    name: 'utility-accounts-and-bills',
+    up: async (db) => { await db.execAsync(V36_SQL); },
+  },
+  {
+    version: 37,
+    name: 'account-snapshots',
+    up: async (db) => { await db.execAsync(V37_SQL); },
+  },
+  {
+    version: 38,
+    name: 'csv-imports',
+    up: async (db) => { await db.execAsync(V38_SQL); },
+  },
 ];
 
 // Tables present after v1 — used by the legacy-stamp detection in runMigrations()
@@ -1233,6 +1473,13 @@ export const TABLES = [
   // (FK CASCADE). Children-first wipe order requires fuel_fillups before
   // both parents.
   'fuel_fillups',
+  // 7.10 — budget_rollover is a child of categories (FK CASCADE). Children-first
+  // wipe order requires it before categories.
+  'budget_rollover',
+  // 7.12 — utility_bills is a child of BOTH utility_accounts (FK CASCADE)
+  // AND expenses (FK CASCADE via UNIQUE expense_id). Children-first wipe
+  // order requires utility_bills before both parents.
+  'utility_bills',
   'receipt_items', 'expenses', 'income', 'categories',
   'subscriptions', 'goals',
   // 7.5 — emi_loans is a parent of expenses (expenses.emi_loan_id → emi_loans.id
@@ -1268,6 +1515,21 @@ export const TABLES = [
   // not by id). Ordering is purely organisational; place next to the other
   // user-customisation tables.
   'pantry_items',
+  // 7.8 — price_alerts has no FK (it joins to item_summary by normalized_name).
+  // Ordering is purely organisational; place next to the other user-owned
+  // reference tables.
+  'price_alerts',
+  // 7.9 — expense_splits is a child of both expenses (already wiped above)
+  // and people. Children-first wipe order requires expense_splits before
+  // people.
+  'expense_splits', 'people',
+  // 7.12 — utility_accounts is the parent of utility_bills (already wiped
+  // above). Place near the other user-owned reference tables.
+  'utility_accounts',
+  // 7.13 — account_snapshots has no FK; place near other audit-style tables.
+  'account_snapshots',
+  // 7.15 — csv_imports is a pure audit table, no FKs.
+  'csv_imports',
   'accounts', 'settings', 'profile',
 ];
 

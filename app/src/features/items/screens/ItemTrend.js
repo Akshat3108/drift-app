@@ -3,13 +3,16 @@ import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useItemActions } from '@features/items/context';
+import { usePriceAlerts } from '@features/price_alerts/context';
 import { cheapestMerchantPerItem } from '../../../analytics';
 
 function ItemTrend({ route, navigation }) {
   const { F, sym } = useApp();
   const { priceHistory, stats: statsQuery, sameQtyHistory, consumption: consumptionQuery } = useItemActions();
+  const { alerts: priceAlerts } = usePriceAlerts();
   const insets = useSafeAreaInsets();
   const { normalizedName, displayName } = route.params;
+  const watching = (priceAlerts || []).find(a => a.normalized_name === normalizedName) || null;
 
   const [history, setHistory] = useState([]);
   const [stats, setStats]     = useState(null);
@@ -99,6 +102,34 @@ function ItemTrend({ route, navigation }) {
           <Text style={{ fontSize: 13, color: F.ink2, marginTop: 6 }}>No purchases yet</Text>
         )}
       </View>
+
+      {/* 7.8 — Watch price chip. Tap → EditPriceAlert. When watching, chip is
+          coral-filled and labels the existing threshold; otherwise outlined. */}
+      <TouchableOpacity
+        onPress={() => navigation.navigate('EditPriceAlert', watching
+          ? { id: watching.id }
+          : { normalized_name: normalizedName, display_name: displayName })}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={watching ? 'Edit price alert' : 'Start watching price'}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 8,
+          alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 10,
+          marginBottom: 12, borderRadius: 18,
+          backgroundColor: watching ? F.coral : F.surface,
+          borderWidth: 1, borderColor: watching ? F.coral : F.line,
+        }}>
+        <Text style={{ fontSize: 13, color: watching ? '#fff' : F.ink, fontWeight: '600' }}>
+          🔔 {watching ? (
+            watching.ceiling_price != null
+              ? `Watching over ${sym}${Math.round(watching.ceiling_price)}`
+              : watching.jump_pct != null
+                ? `Watching +${Math.round(watching.jump_pct)}%`
+                : 'Watching'
+          ) : 'Watch price'}
+        </Text>
+      </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
         {/* 6.14 — the Cheapest pill is only included when ≥1 merchant has

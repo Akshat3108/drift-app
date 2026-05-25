@@ -35,10 +35,15 @@ export function formatChipDate(iso) {
   return `${d} ${MONTHS[m - 1] || ''}`.trim();
 }
 
-function Add({ navigation }) {
+function Add({ navigation, route }) {
   const { F, sym, pots, expenses, addExpense, addExpenseWithItems, addIncome, settings } = useApp();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+
+  // 7.11 — optional prefill params from Home's "Expected this month" tile.
+  // Read once on mount via useState initialisers so subsequent navigations
+  // don't fight the user's edits.
+  const prefill = route?.params || null;
 
   // 5.5 — top-level Expense | Income toggle. Income mode bypasses
   // pots/mood/recurring/items/payment and writes to the income table instead.
@@ -62,9 +67,11 @@ function Add({ navigation }) {
   }, [expenses]);
 
   const [mode, setMode]         = useState('quick'); // 'quick' | 'detailed'
-  const [amount, setAmount]     = useState('0.00');
-  const [merchant, setMerchant] = useState('');
-  const [potId, setPotId]       = useState(initialPotId);
+  const [amount, setAmount]     = useState(
+    prefill?.prefillAmount != null ? formatAmountForKeypad(Number(prefill.prefillAmount)) : '0.00'
+  );
+  const [merchant, setMerchant] = useState(prefill?.prefillMerchant || '');
+  const [potId, setPotId]       = useState(prefill?.prefillCategoryId ?? initialPotId);
   const [paymentMethod, setPaymentMethod] = useState(initialPayment);
 
   useEffect(() => {
@@ -89,7 +96,10 @@ function Add({ navigation }) {
   const [merchantSuggestions, setMerchantSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const pickedMerchantIdRef = useRef(null);
-  const userTouchedCategoryRef = useRef(false);
+  // 7.11 — when the user opened Add via the "Expected this month" tile, the
+  // category is already an intentional pick; pre-set the touched flag so the
+  // 5.10 silent auto-cat path can't override the prefill mid-typing.
+  const userTouchedCategoryRef = useRef(prefill?.prefillCategoryId != null);
   const suggestReqIdRef = useRef(0);
   const debounceRef = useRef(null);
 

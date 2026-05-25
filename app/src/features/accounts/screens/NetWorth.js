@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
+import NetWorthChart from '@components/NetWorthChart';
 
 function NetWorth({ navigation }) {
   const { F, sym, accounts } = useApp();
@@ -80,6 +81,11 @@ function NetWorth({ navigation }) {
           <Text style={{ fontSize: 12, color: F.coral }}>− {sym}{lt.toLocaleString()} owed</Text>
         </View>
       </View>
+
+      {/* 7.13 — Trajectory chart renders only once at least a week of
+          snapshots is in the table. AccountsProvider re-stamps today's
+          snapshot on every mutation. */}
+      <NetWorthChart/>
 
       <Section title="Assets"      total={at} items={assets} kind="asset"
         sign=""  totalColor={F.sageD}/>

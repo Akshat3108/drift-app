@@ -350,6 +350,18 @@ function Profile({ navigation }) {
         <Row icon="🥗" label="Manage pantry" sub="Track what you own and what's running low" F={F}
           onPress={() => navigation.navigate('Pantry')}
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🔔" label="Manage price alerts" sub="Watch tracked items for jumps" F={F}
+          onPress={() => navigation.navigate('PriceAlerts')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="👥" label="Manage people" sub="Splits + per-person balances" F={F}
+          onPress={() => navigation.navigate('People')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="💡" label="Manage utilities" sub="Electricity, gas, internet, mobile" F={F}
+          onPress={() => navigation.navigate('Utilities')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="📥" label="Import CSV statement" sub="HDFC, SBI, ICICI credit card" F={F}
+          onPress={() => navigation.navigate('CsvImport')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         {recentSearches.length > 0 && (
           <Row icon="🕘" label="Clear search history" sub={`${recentSearches.length} recent search${recentSearches.length === 1 ? '' : 'es'}`} F={F}
             onPress={handleClearSearches}

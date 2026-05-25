@@ -37,6 +37,17 @@ import EditVehicleScreen   from '@features/fuel/screens/EditVehicle';
 import EditFillupScreen    from '@features/fuel/screens/EditFillup';
 import PantryScreen        from '@features/pantry/screens/Pantry';
 import EditPantryItemScreen from '@features/pantry/screens/EditPantryItem';
+import PriceAlertsScreen      from '@features/price_alerts/screens/PriceAlerts';
+import EditPriceAlertScreen   from '@features/price_alerts/screens/EditPriceAlert';
+import PeopleScreen           from '@features/splits/screens/People';
+import EditPersonScreen       from '@features/splits/screens/EditPerson';
+import BalancesScreen         from '@features/splits/screens/Balances';
+import UtilitiesScreen        from '@features/utilities/screens/Utilities';
+import UtilityDetailScreen    from '@features/utilities/screens/UtilityDetail';
+import EditUtilityScreen      from '@features/utilities/screens/EditUtility';
+import EditBillScreen         from '@features/utilities/screens/EditBill';
+import CsvImportScreen        from '@features/csv_import/screens/CsvImport';
+import CsvReviewScreen        from '@features/csv_import/screens/CsvReview';
 import EditGoalScreen    from '@features/goals/screens/EditGoal';
 import EditAccountScreen from '@features/accounts/screens/EditAccount';
 import EditTripScreen    from '@features/travel/screens/EditTrip';
@@ -84,6 +95,17 @@ const EditVehicle   = withBoundary('EditVehicle',   EditVehicleScreen);
 const EditFillup    = withBoundary('EditFillup',    EditFillupScreen);
 const Pantry         = withBoundary('Pantry',         PantryScreen);
 const EditPantryItem = withBoundary('EditPantryItem', EditPantryItemScreen);
+const PriceAlerts      = withBoundary('PriceAlerts',      PriceAlertsScreen);
+const EditPriceAlert   = withBoundary('EditPriceAlert',   EditPriceAlertScreen);
+const People           = withBoundary('People',           PeopleScreen);
+const EditPerson       = withBoundary('EditPerson',       EditPersonScreen);
+const Balances         = withBoundary('Balances',         BalancesScreen);
+const Utilities        = withBoundary('Utilities',        UtilitiesScreen);
+const UtilityDetail    = withBoundary('UtilityDetail',    UtilityDetailScreen);
+const EditUtility      = withBoundary('EditUtility',      EditUtilityScreen);
+const EditBill         = withBoundary('EditBill',         EditBillScreen);
+const CsvImport        = withBoundary('CsvImport',        CsvImportScreen);
+const CsvReview        = withBoundary('CsvReview',        CsvReviewScreen);
 const EditGoal    = withBoundary('EditGoal',    EditGoalScreen);
 const EditAccount = withBoundary('EditAccount', EditAccountScreen);
 const EditTrip    = withBoundary('EditTrip',    EditTripScreen);
@@ -212,6 +234,36 @@ export default function Navigation() {
           options={{ title: 'Pantry' }}/>
         <Stack.Screen name="EditPantryItem"     component={EditPantryItem}
           options={({ route }) => ({ title: route?.params?.id ? 'Edit pantry item' : 'Add pantry item' })}/>
+
+        {/* 7.8 — Item price alerts: list + create/edit. */}
+        <Stack.Screen name="PriceAlerts"        component={PriceAlerts}
+          options={{ title: 'Price alerts' }}/>
+        <Stack.Screen name="EditPriceAlert"     component={EditPriceAlert}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit alert' : 'Watch price' })}/>
+
+        {/* 7.9 — People + splits + balances. */}
+        <Stack.Screen name="People"             component={People}
+          options={{ title: 'People' }}/>
+        <Stack.Screen name="EditPerson"         component={EditPerson}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit person' : 'Add person' })}/>
+        <Stack.Screen name="Balances"           component={Balances}
+          options={{ title: 'Balances' }}/>
+
+        {/* 7.12 — Utility bill tracking. */}
+        <Stack.Screen name="Utilities"          component={Utilities}
+          options={{ title: 'Utilities & bills' }}/>
+        <Stack.Screen name="UtilityDetail"      component={UtilityDetail}
+          options={{ title: 'Utility' }}/>
+        <Stack.Screen name="EditUtility"        component={EditUtility}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit utility' : 'Add utility' })}/>
+        <Stack.Screen name="EditBill"           component={EditBill}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit bill' : 'Log bill' })}/>
+
+        {/* 7.15 — CSV statement import. */}
+        <Stack.Screen name="CsvImport"          component={CsvImport}
+          options={{ title: 'Import CSV' }}/>
+        <Stack.Screen name="CsvReview"          component={CsvReview}
+          options={{ title: 'Review import' }}/>
       </Stack.Navigator>
     </NavigationContainer>
   );

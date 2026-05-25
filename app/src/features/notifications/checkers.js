@@ -98,11 +98,98 @@ export function evaluateSubsDue({ subs, settings, now = new Date(), sym = '₹' 
   return out;
 }
 
-// Stub for 7.1; 7.8 introduces the price_alerts table and wires this up.
-// Keeping the signature here means 7.8 only has to fill the body and the
-// notification_log kind already supports 'price_alert'.
-export function evaluatePriceAlerts(/* { items, alerts, settings, sym } */) {
-  return [];
+function formatDateLocalYMD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// 7.8 — Price alerts checker.
+//
+// Event-driven: NotificationsProvider invokes this when a PRICE_OBSERVATIONS
+// event fires (emitted by ExpensesProvider.addExpenseWithItems with the
+// just-scanned items' normalized_name + scanned_price). For each observation
+// we look up a live, enabled alert by normalized_name and emit a plan if EITHER:
+//   - alert.ceiling_price !== null AND scanned_price > ceiling_price, OR
+//   - alert.jump_pct !== null AND baseline_price > 0
+//                              AND scanned_price > baseline_price * (1 + jump_pct/100)
+//
+// Dedupe key embeds the local YMD so a re-scan of the same item the same day
+// can't double-fire; tomorrow's scan re-arms. The `alert_id` is stashed on the
+// payload so the provider can call priceAlertsRepo.markFired AFTER repo.log()
+// confirms a non-deduped row landed (markFired slides baseline_price forward
+// so subsequent jumps measure from this new peak).
+export function evaluatePriceAlerts({ observations, alerts, settings, now = new Date(), sym = '₹' }) {
+  if (!settings?.notifications_enabled) return [];
+  const obs = Array.isArray(observations) ? observations : [];
+  if (!obs.length) return [];
+  const alertList = Array.isArray(alerts) ? alerts : [];
+  if (!alertList.length) return [];
+  const byName = new Map();
+  for (const a of alertList) {
+    if (a.deleted_at) continue;
+    if (!a.enabled) continue;
+    byName.set(a.normalized_name, a);
+  }
+  const ymd = formatDateLocalYMD(now);
+  const out = [];
+  for (const o of obs) {
+    const nn = o?.normalized_name;
+    const price = Number(o?.scanned_price);
+    if (!nn || !Number.isFinite(price) || price <= 0) continue;
+    const alert = byName.get(nn);
+    if (!alert) continue;
+
+    let triggered = false;
+    let reason = null;
+    let thresholdValue = null;
+
+    const ceiling = alert.ceiling_price == null ? null : Number(alert.ceiling_price);
+    if (ceiling != null && Number.isFinite(ceiling) && price > ceiling) {
+      triggered = true;
+      reason = 'ceiling';
+      thresholdValue = ceiling;
+    }
+    if (!triggered) {
+      const pct = alert.jump_pct == null ? null : Number(alert.jump_pct);
+      const baseline = alert.baseline_price == null ? null : Number(alert.baseline_price);
+      if (pct != null && Number.isFinite(pct) && baseline != null && Number.isFinite(baseline) && baseline > 0) {
+        const target = baseline * (1 + pct / 100);
+        if (price > target) {
+          triggered = true;
+          reason = 'jump';
+          thresholdValue = pct;
+        }
+      }
+    }
+    if (!triggered) continue;
+
+    const dedupe_key = `price:${nn}:${ymd}`;
+    const displayName = alert.display_name || nn;
+    const title = reason === 'ceiling'
+      ? `${displayName} price above ${fmtAmount(thresholdValue, sym)}`
+      : `${displayName} price jumped +${Math.round(thresholdValue)}%`;
+    const body = reason === 'ceiling'
+      ? `Now ${fmtAmount(price, sym)} — over your ${fmtAmount(thresholdValue, sym)} ceiling.`
+      : `Now ${fmtAmount(price, sym)} from ${fmtAmount(alert.baseline_price, sym)}.`;
+    out.push({
+      dedupe_key,
+      kind: 'price_alert',
+      title,
+      body,
+      payload: {
+        alert_id: alert.id,
+        normalized_name: nn,
+        scanned_price: price,
+        reason,
+        threshold: thresholdValue,
+        baseline_price: alert.baseline_price ?? null,
+      },
+      schedule: { type: 'now' },
+    });
+  }
+  return out;
 }
 
 // ISO-8601 week key in the form 'YYYY-Www'. Used by 7.7 to dedupe pantry

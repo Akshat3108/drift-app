@@ -18,6 +18,8 @@ import {
 import { useExpenses } from '@features/expenses/context';
 import { useSubs } from '@features/subs/context';
 import { usePantry } from '@features/pantry/context';
+import { usePriceAlerts } from '@features/price_alerts/context';
+import { priceAlertsRepo } from '@features/price_alerts/repo';
 import { useSettings } from '@features/profile/settings.context';
 import { useNotifyBusListener, NOTIFY_EVENTS } from '@core/state/NotifyBus';
 
@@ -60,6 +62,7 @@ export function NotificationsProvider({ children }) {
   const { pots } = useExpenses();
   const { subs } = useSubs();
   const { items: pantry } = usePantry();
+  const { alerts: priceAlerts } = usePriceAlerts();
   const { settings, sym } = useSettings();
 
   const [unreadCount, setUnreadCount] = useState(0);
@@ -73,11 +76,13 @@ export function NotificationsProvider({ children }) {
   const potsRef = useRef(pots);
   const subsRef = useRef(subs);
   const pantryRef = useRef(pantry);
+  const priceAlertsRef = useRef(priceAlerts);
   const settingsRef = useRef(settings);
   const symRef = useRef(sym);
   useEffect(() => { potsRef.current = pots; }, [pots]);
   useEffect(() => { subsRef.current = subs; }, [subs]);
   useEffect(() => { pantryRef.current = pantry; }, [pantry]);
+  useEffect(() => { priceAlertsRef.current = priceAlerts; }, [priceAlerts]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { symRef.current = sym; }, [sym]);
 
@@ -111,6 +116,57 @@ export function NotificationsProvider({ children }) {
       await applyPlan(plan);
       await refreshUnread();
     }
+  }, [refreshUnread]);
+
+  // 7.8 — Price alert evaluator. Event-driven via PRICE_OBSERVATIONS.
+  // `observations` is an array of {normalized_name, scanned_price} extracted
+  // from a just-scanned receipt's items. The pure checker returns plan items;
+  // applyPlan logs+presents them, and we follow up with markFired so the
+  // alert row's baseline_price slides forward for the next jump check.
+  const evaluatePriceObservations = useCallback(async (observations) => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    if (!Array.isArray(observations) || !observations.length) return;
+    const plan = evaluatePriceAlerts({
+      observations,
+      alerts: priceAlertsRef.current || [],
+      settings: settingsRef.current,
+      sym: symRef.current,
+    });
+    if (!plan.length) return;
+
+    // We need to know which plan items actually landed (didn't collide on
+    // the dedupe UNIQUE) before calling markFired. The shared applyPlan
+    // helper runs the log step inline so we mirror that here with a tiny
+    // post-hook list, then call markFired for the survivors.
+    const fired = [];
+    for (const item of plan) {
+      const logged = await notificationsRepo.log({
+        kind: item.kind,
+        title: item.title,
+        body: item.body,
+        payload: item.payload,
+        scheduled_for: item.schedule?.date ? item.schedule.date.toISOString() : null,
+        dedupe_key: item.dedupe_key || null,
+      });
+      if (!logged) continue;
+      if (item.schedule?.type === 'now') {
+        const sysId = await presentNow({
+          title: item.title,
+          body: item.body,
+          data: { ...(item.payload || {}), notif_id: logged.id },
+        });
+        if (sysId) await notificationsRepo.markDelivered(logged.id);
+      }
+      fired.push(item);
+    }
+    for (const item of fired) {
+      const aid = item.payload?.alert_id;
+      const scanned = item.payload?.scanned_price;
+      if (aid != null && scanned != null) {
+        await priceAlertsRepo.markFired(aid, scanned).catch(() => {});
+      }
+    }
+    await refreshUnread();
   }, [refreshUnread]);
 
   const rescheduleAllSubs = useCallback(async () => {
@@ -160,7 +216,6 @@ export function NotificationsProvider({ children }) {
         await Promise.all([
           evaluateBudgets(),
           rescheduleAllSubs(),
-          evaluatePriceAlerts(),
           evaluatePantry(),
         ]);
       }
@@ -199,6 +254,11 @@ export function NotificationsProvider({ children }) {
   useNotifyBusListener(NOTIFY_EVENTS.PANTRY_CHANGED, useCallback(() => {
     evaluatePantry();
   }, [evaluatePantry]));
+
+  // 7.8 — Price observations from ExpensesProvider.addExpenseWithItems.
+  useNotifyBusListener(NOTIFY_EVENTS.PRICE_OBSERVATIONS, useCallback((payload) => {
+    evaluatePriceObservations(payload?.observations);
+  }, [evaluatePriceObservations]));
 
   useNotifyBusListener(NOTIFY_EVENTS.SUB_UPSERTED, useCallback((sub) => {
     rescheduleSub(sub);

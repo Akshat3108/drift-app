@@ -18,7 +18,12 @@ function PotDetail({ route, navigation }) {
   );
 
   const potExpenses = expenses.filter(e => e.category_id === potId);
-  const pct = pot.budget > 0 ? pot.spend / pot.budget : 0;
+  // 7.10 — effective budget includes carry-over from prior month when the
+  // category has rollover_enabled. Pots already carry `rollover_in` from
+  // the summaryByCategory join (0 when no row exists).
+  const rolloverIn = pot.rollover_enabled ? Number(pot.rollover_in) || 0 : 0;
+  const effectiveBudget = (pot.budget || 0) + rolloverIn;
+  const pct = effectiveBudget > 0 ? pot.spend / effectiveBudget : 0;
   const over = pct > 1;
 
   const grouped = potExpenses.reduce((acc, e) => {
@@ -63,10 +68,24 @@ function PotDetail({ route, navigation }) {
             <Text style={{ fontSize: 13, color: F.ink2, marginTop: 2 }}>
               of {sym}{pot.budget} budget
               {over && (
-                <Text style={{ color: F.coral }}>  · ⚠ over by {sym}{(pot.spend - pot.budget).toFixed(2)}</Text>
+                <Text style={{ color: F.coral }}>  · ⚠ over by {sym}{(pot.spend - effectiveBudget).toFixed(2)}</Text>
               )}
             </Text>
-            <ProgressBar value={pot.spend} max={pot.budget}
+            {/* 7.10 — rollover badge: green when prior month had leftover (we
+                start this month with bonus budget); coral when prior month
+                overspent (this month starts with a penalty). */}
+            {pot.rollover_enabled && rolloverIn !== 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                <Text style={{ fontSize: 12,
+                  color: rolloverIn > 0 ? F.sageD : F.coral, fontWeight: '600' }}>
+                  ↻ {rolloverIn > 0 ? '+' : '−'}{sym}{Math.abs(rolloverIn).toFixed(2)} carried in
+                </Text>
+                <Text style={{ fontSize: 11, color: F.ink3 }}>
+                  · effective {sym}{effectiveBudget.toFixed(2)}
+                </Text>
+              </View>
+            )}
+            <ProgressBar value={pot.spend} max={effectiveBudget}
               color={over ? F.coral : F.sageD} F={F} height={8}/>
             {/* 2.D.19 — glyph prefix on the status labels. ⚠ over signals
                 breach; ✓ left signals safe. Color stays as redundant cue. */}
@@ -75,7 +94,7 @@ function PotDetail({ route, navigation }) {
                 {over ? '⚠ ' : '✓ '}{Math.round(pct * 100)}% used
               </Text>
               <Text style={{ fontSize: 12, color: F.ink2 }}>
-                {sym}{Math.max(0, pot.budget - pot.spend).toFixed(2)} left
+                {sym}{Math.max(0, effectiveBudget - pot.spend).toFixed(2)} left
               </Text>
             </View>
           </>

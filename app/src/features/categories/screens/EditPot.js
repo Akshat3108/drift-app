@@ -72,14 +72,24 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
   const [emoji, setEmoji]   = useState(editing?.emoji || '🍴');
   const [budget, setBudget] = useState(editing ? String(editing.budget) : '');
   const [color, setColor]   = useState(editing?.color || 'cream');
+  // 7.10 — per-category rollover opt-in. Bidirectional: under-spend carries
+  // forward as a credit, over-spend as a debit. Computed lazily by
+  // rolloverRepo.ensureRolloverForMonth before each pots() read.
+  const [rolloverEnabled, setRolloverEnabled] = useState(editing ? !!editing.rollover_enabled : false);
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Name required');
     const bud = parseFloat(budget) || 0;
     if (editing) {
-      await updateCategory(editing.id, { name: name.trim(), emoji, budget: bud, color });
+      await updateCategory(editing.id, {
+        name: name.trim(), emoji, budget: bud, color,
+        rollover_enabled: rolloverEnabled ? 1 : 0,
+      });
     } else {
-      await addCategory({ name: name.trim(), emoji, budget: bud, color });
+      await addCategory({
+        name: name.trim(), emoji, budget: bud, color,
+        rollover_enabled: rolloverEnabled ? 1 : 0,
+      });
     }
     navigation.goBack();
   };
@@ -158,6 +168,35 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
           );
         })}
       </View>
+
+      <Text style={{ fontSize: 11, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 8 }}>
+        ROLLOVER
+      </Text>
+      <TouchableOpacity onPress={() => setRolloverEnabled(v => !v)}
+        activeOpacity={0.85}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: rolloverEnabled }}
+        accessibilityLabel="Roll unspent or overspend into next month"
+        style={{ padding: 14, borderRadius: 12,
+          backgroundColor: rolloverEnabled ? F.sage : F.surface,
+          borderWidth: 1, borderColor: rolloverEnabled ? F.sage : F.line,
+          flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+        <Text style={{ fontSize: 20 }}>↻</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, color: rolloverEnabled ? '#fff' : F.ink, fontWeight: '600' }}>
+            Roll into next month
+          </Text>
+          <Text style={{ fontSize: 11, color: rolloverEnabled ? '#fff' : F.ink3, marginTop: 2 }}>
+            Bidirectional — leftover carries forward, over-spend deducts.
+          </Text>
+        </View>
+        <Text style={{ fontSize: 13, color: rolloverEnabled ? '#fff' : F.ink2, fontWeight: '500' }}>
+          {rolloverEnabled ? 'On' : 'Off'}
+        </Text>
+      </TouchableOpacity>
+      <Text style={{ fontSize: 11, color: F.ink3, marginBottom: 22 }}>
+        Carryover settles at month-end and re-derives on every read — retroactive edits flow forward.
+      </Text>
 
       <TouchableOpacity onPress={save}
         style={{ backgroundColor: F.coral, padding: 16, borderRadius: 14, alignItems: 'center', marginBottom: 12 }}>

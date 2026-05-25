@@ -50,8 +50,15 @@ export function useNotifyBusListener(event, fn) {
 
 // Event names — single source of truth so emitters and listeners can't drift.
 export const NOTIFY_EVENTS = {
-  EXPENSE_CHANGED: 'expense:changed',
-  SUB_UPSERTED:    'sub:upserted',
-  SUB_REMOVED:     'sub:removed',
-  PANTRY_CHANGED:  'pantry:changed',
+  EXPENSE_CHANGED:     'expense:changed',
+  SUB_UPSERTED:        'sub:upserted',
+  SUB_REMOVED:         'sub:removed',
+  PANTRY_CHANGED:      'pantry:changed',
+  // 7.8 — fired by ExpensesProvider.addExpenseWithItems with payload
+  // `{ observations: [{ normalized_name, scanned_price }] }` so the
+  // notifications layer can run price-alert checks against the just-scanned
+  // unit prices (item_summary.last_unit_price has already been mutated by
+  // the receipt_items AI trigger, so this event carries the snapshot the
+  // checker needs).
+  PRICE_OBSERVATIONS:  'price:observations',
 };

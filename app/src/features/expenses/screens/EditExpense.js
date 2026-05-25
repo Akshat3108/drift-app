@@ -6,6 +6,8 @@ import { useExpenses } from '@features/expenses/context';
 import { useItemActions } from '@features/items/context';
 import { useTags } from '@features/tags/context';
 import TagChipSurface from '@features/tags/components/TagChipSurface';
+import { usePeople } from '@features/splits/context';
+import SplitChipSurface from '@features/splits/components/SplitChipSurface';
 import { useEmi } from '@features/emi/context';
 import { MoodPicker } from '@components/primitives/MoodPicker';
 import PaymentPicker from '@components/primitives/PaymentPicker';
@@ -15,8 +17,9 @@ const MOODS = ['😍', '😌', '😐', '😬', '😞'];
 
 function EditExpense({ route, navigation }) {
   const { F, sym, expenses, pots, updateExpense, updateExpenseWithItems } = useApp();
-  const { tagsForExpense } = useExpenses();
+  const { tagsForExpense, splitsForExpense } = useExpenses();
   const { tags: allTags, getOrCreateTag } = useTags();
+  const { people, getOrCreatePerson } = usePeople();
   const { loans: emiLoans } = useEmi();
   const { listByExpense, replaceItems } = useItemActions();
   const insets = useSafeAreaInsets();
@@ -42,6 +45,9 @@ function EditExpense({ route, navigation }) {
   const [tagNames, setTagNames]   = useState([]);
   const [showTagInput, setShowTagInput]     = useState(false);
   const [pendingTagName, setPendingTagName] = useState('');
+  // 7.9 — splits set for this expense ({person_id, amount}[]). Loaded from
+  // splitsForExpense on mount; passes through ExpensesProvider's diff-write.
+  const [splits, setSplits] = useState([]);
   // 7.5 — optional EMI loan link. `emi_loan_id` is a real column on
   // expenses (v30) so it flows through update/updateWithItems patches.
   const [emiLoanId, setEmiLoanId] = useState(e?.emi_loan_id ?? null);
@@ -62,6 +68,13 @@ function EditExpense({ route, navigation }) {
       setTagNames((list || []).map((t) => t.name));
     }).catch(() => { setTagNames([]); });
   }, [e?.id, tagsForExpense]);
+
+  useEffect(() => {
+    if (!e?.id) return;
+    splitsForExpense(e.id).then((list) => {
+      setSplits((list || []).map((r) => ({ person_id: r.person_id, amount: Number(r.amount) || 0 })));
+    }).catch(() => { setSplits([]); });
+  }, [e?.id, splitsForExpense]);
 
   const itemsSum = useMemo(() => rowsTotal(rows), [rows]);
 
@@ -92,6 +105,7 @@ function EditExpense({ route, navigation }) {
           notes: notes.trim() || null,
           payment_method: paymentMethod,
           tags: tagNames,
+          splits,
           emi_loan_id: emiLoanId,
         }, items);
       } else {
@@ -107,6 +121,7 @@ function EditExpense({ route, navigation }) {
           notes: notes.trim() || null,
           payment_method: paymentMethod,
           tags: tagNames,
+          splits,
           emi_loan_id: emiLoanId,
         });
         if (hadItems) {
@@ -224,6 +239,20 @@ function EditExpense({ route, navigation }) {
         pendingTagName={pendingTagName}
         setPendingTagName={setPendingTagName}
         getOrCreateTag={getOrCreateTag}
+        style={{ marginBottom: 14 }}
+      />
+
+      {/* 7.9 — Split surface. Pass expenseTotal so the Σ validation can render
+          green at parity / red on overage. Both `useItems` and "amount" paths
+          compute total live so users see the validation update immediately. */}
+      <SplitChipSurface
+        F={F}
+        people={people}
+        splits={splits}
+        setSplits={setSplits}
+        expenseTotal={useItems ? itemsSum : (parseFloat(amount) || 0)}
+        getOrCreatePerson={getOrCreatePerson}
+        sym={sym}
         style={{ marginBottom: 14 }}
       />
 

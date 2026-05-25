@@ -29,3 +29,8 @@ export {
 } from './seasonal';
 // 6.11
 export { categoryVarianceMatrix } from './variance';
+
+// 7.11 — Recurring expense detection. `detectRecurringCandidates` is the pure
+// helper exercised by the /tmp/ harness; `recurringCandidates` is the
+// DB-backed convenience wrapper used by the Home tile.
+export { recurringCandidates, detectRecurringCandidates } from './patterns';

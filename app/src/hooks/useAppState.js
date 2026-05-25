@@ -14,6 +14,9 @@ import { SubsProvider, useSubs } from '@features/subs/context';
 import { EmiProvider, useEmi } from '@features/emi/context';
 import { FuelProvider, useFuel } from '@features/fuel/context';
 import { PantryProvider, usePantry } from '@features/pantry/context';
+import { PriceAlertsProvider, usePriceAlerts } from '@features/price_alerts/context';
+import { PeopleProvider, usePeople } from '@features/splits/context';
+import { UtilitiesProvider, useUtilities } from '@features/utilities/context';
 import { GoalsProvider, useGoals } from '@features/goals/context';
 import { AccountsProvider, useAccounts } from '@features/accounts/context';
 import { TravelProvider, useTravel } from '@features/travel/context';
@@ -47,6 +50,9 @@ function ReadyGate({ children }) {
     useEmi().ready,
     useFuel().ready,
     usePantry().ready,
+    usePriceAlerts().ready,
+    usePeople().ready,
+    useUtilities().ready,
   ];
   if (!flags.every(Boolean)) return null;
   return children;
@@ -76,6 +82,9 @@ export function AppRoot({ children }) {
                      <EmiProvider>
                       <FuelProvider>
                       <PantryProvider>
+                      <PriceAlertsProvider>
+                      <PeopleProvider>
+                      <UtilitiesProvider>
                       <GoalsProvider>
                         <AccountsProvider>
                           <TravelProvider>
@@ -85,6 +94,9 @@ export function AppRoot({ children }) {
                           </TravelProvider>
                         </AccountsProvider>
                       </GoalsProvider>
+                      </UtilitiesProvider>
+                      </PeopleProvider>
+                      </PriceAlertsProvider>
                       </PantryProvider>
                       </FuelProvider>
                      </EmiProvider>

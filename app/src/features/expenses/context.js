@@ -2,6 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { expenses as expRepo } from './repo';
 import { items as itemRepo } from '@features/items/repo';
 import { tagsRepo } from '@features/tags/repo';
+import { splitsRepo } from '@features/splits/repo';
+import { rolloverRepo } from '@features/rollover/repo';
 import { useRegisterRefresh } from '@core/state/RefreshBus';
 import { useNotifyBus, NOTIFY_EVENTS } from '@core/state/NotifyBus';
 
@@ -51,7 +53,12 @@ export function ExpensesProvider({ children }) {
   const [ready, setReady] = useState(false);
   const notifyBus = useNotifyBus();
 
+  // 7.10 — ensure rollover for the current month before summarising. Idempotent.
+  // No-op when no category has rollover_enabled or when prior history is absent.
+  const currentMonthKey = () => new Date().toISOString().slice(0, 7);
+
   const refreshSummary = useCallback(async () => {
+    await rolloverRepo.ensureRolloverForMonth(currentMonthKey()).catch(() => {});
     const rows = await expRepo.summaryByCategory();
     setSummary(summaryFromRows(rows));
     // 7.1 — let the notifications provider re-evaluate budget thresholds against
@@ -61,6 +68,7 @@ export function ExpensesProvider({ children }) {
   }, [notifyBus]);
 
   const refresh = useCallback(async () => {
+    await rolloverRepo.ensureRolloverForMonth(currentMonthKey()).catch(() => {});
     const [e, sumRows] = await Promise.all([
       expRepo.list({ limit: EXPENSES_LIMIT }),
       expRepo.summaryByCategory(),
@@ -83,10 +91,14 @@ export function ExpensesProvider({ children }) {
     // 7.3 — split tags out of the patch so the expenses table SQL isn't
     // confused by an unknown column. `undefined` means "don't touch joins",
     // an empty array means "clear all joins".
-    const { tags, ...rest } = data || {};
+    // 7.9 — same pattern for splits ({person_id, amount}[]).
+    const { tags, splits, ...rest } = data || {};
     const row = await expRepo.create(rest);
     if (Array.isArray(tags) && row?.id != null) {
       await tagsRepo.setForExpense(row.id, tags);
+    }
+    if (Array.isArray(splits) && row?.id != null) {
+      await splitsRepo.setForExpense(row.id, splits);
     }
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
@@ -94,10 +106,13 @@ export function ExpensesProvider({ children }) {
   }, [refreshSummary]);
 
   const updateExpense = useCallback(async (id, patch) => {
-    const { tags, ...rest } = patch || {};
+    const { tags, splits, ...rest } = patch || {};
     const row = await expRepo.update(id, rest);
     if (Array.isArray(tags)) {
       await tagsRepo.setForExpense(id, tags);
+    }
+    if (Array.isArray(splits)) {
+      await splitsRepo.setForExpense(id, splits);
     }
     if (row) setExpenses(prev => sortExpenses(prev.map(e => e.id === id ? row : e)));
     await refreshSummary();
@@ -139,22 +154,43 @@ export function ExpensesProvider({ children }) {
   const addExpenseWithItems = useCallback(async ({ expense, items }) => {
     // 7.3 — tags come through on the expense slice; pull them out before
     // createWithItems writes the row (its INSERT doesn't know about tags).
-    const { tags, ...expenseRest } = expense || {};
+    // 7.9 — same pattern for splits.
+    const { tags, splits, ...expenseRest } = expense || {};
     const row = await expRepo.createWithItems({ expense: expenseRest, items });
     if (Array.isArray(tags) && row?.id != null) {
       await tagsRepo.setForExpense(row.id, tags);
     }
+    if (Array.isArray(splits) && row?.id != null) {
+      await splitsRepo.setForExpense(row.id, splits);
+    }
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
+    // 7.8 — Emit a price-observations event so NotificationsProvider can run
+    // the price-alert checker against the just-scanned unit prices. Skipped
+    // when items is empty/missing (manual expense saves don't observe prices).
+    if (Array.isArray(items) && items.length) {
+      const observations = items
+        .filter(i => i && i.normalized_name && Number.isFinite(Number(i.unit_price)))
+        .map(i => ({
+          normalized_name: i.normalized_name,
+          scanned_price: Number(i.unit_price),
+        }));
+      if (observations.length) {
+        notifyBus?.emit(NOTIFY_EVENTS.PRICE_OBSERVATIONS, { observations });
+      }
+    }
     return row;
-  }, [refreshSummary]);
+  }, [refreshSummary, notifyBus]);
 
   const updateExpenseWithItems = useCallback(async (id, patch, items) => {
-    const { tags, ...patchRest } = patch || {};
+    const { tags, splits, ...patchRest } = patch || {};
     const updated = await expRepo.update(id, patchRest);
     await itemRepo.replaceItems(id, items, updated?.expense_date);
     if (Array.isArray(tags)) {
       await tagsRepo.setForExpense(id, tags);
+    }
+    if (Array.isArray(splits)) {
+      await splitsRepo.setForExpense(id, splits);
     }
     if (updated) setExpenses(prev => sortExpenses(prev.map(e => e.id === id ? updated : e)));
     await refreshSummary();
@@ -180,6 +216,9 @@ export function ExpensesProvider({ children }) {
     // 7.3 — async read-through to the tags repo for screens that want the
     // current tag set for a single expense (Edit/Detail).
     tagsForExpense: (id) => tagsRepo.listForExpense(id),
+    // 7.9 — async read-through to the splits repo for screens that want the
+    // current split set for a single expense (Edit/Detail).
+    splitsForExpense: (id) => splitsRepo.listForExpense(id),
   };
   return <ExpensesContext.Provider value={value}>{children}</ExpensesContext.Provider>;
 }

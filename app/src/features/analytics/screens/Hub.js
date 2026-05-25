@@ -233,6 +233,18 @@ function Hub({ navigation }) {
         <ReportRow icon="🥗" title="Pantry"
           sub="Inventory + low-stock shopping list"
           F={F} onPress={() => navigation.navigate('Pantry')}/>
+        <ReportRow icon="🔔" title="Price alerts"
+          sub="Watch items that creep up"
+          F={F} onPress={() => navigation.navigate('PriceAlerts')}/>
+        <ReportRow icon="👥" title="People & splits"
+          sub="Track who owes you what"
+          F={F} onPress={() => navigation.navigate('People')}/>
+        <ReportRow icon="💡" title="Utilities & bills"
+          sub="Electricity, gas, internet, mobile + consumption trends"
+          F={F} onPress={() => navigation.navigate('Utilities')}/>
+        <ReportRow icon="📥" title="Import CSV statement"
+          sub="HDFC, SBI, ICICI credit card — review then keep"
+          F={F} onPress={() => navigation.navigate('CsvImport')}/>
       </View>
 
       <Text style={{ fontSize: 10, color: F.ink3, marginTop: 14, textAlign: 'center', lineHeight: 14 }}>

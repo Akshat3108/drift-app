@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, TextInput, ScrollView, Alert } from 'reac
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { MoodPicker } from '@components/primitives/MoodPicker';
+import { templatesRepo, applyTemplateToAddState } from '@features/expenses/templates.repo';
 import PaymentPicker from '@components/primitives/PaymentPicker';
 import ItemRows, { emptyRow, toPersistedItems, rowsTotal } from '@components/ItemRows';
 import { merchants as merchantRepo } from '@features/expenses/merchants.repo';
@@ -12,6 +13,7 @@ import { useTags } from '@features/tags/context';
 import TagChipSurface from '@features/tags/components/TagChipSurface';
 import { logError } from '@core/utils/log';
 import { useToast } from '@components/Toast';
+import { estimateCarbon, carbonImpactLabel } from '../../../analytics';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
 const MOODS = ['😍', '😌', '😐', '😬', '😞'];
@@ -109,6 +111,25 @@ function Add({ navigation, route }) {
   const [lastSpend, setLastSpend] = useState(null);
   const [chipApplied, setChipApplied] = useState(false);
   const lastSpendReqIdRef = useRef(0);
+
+  // PS-09 — Quick-Entry Templates chip row.
+  const [templates, setTemplates] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    templatesRepo.list().then((rows) => {
+      if (!cancelled) setTemplates(rows || []);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const applyTemplate = useCallback((tmpl) => {
+    const patch = applyTemplateToAddState(tmpl, pots);
+    if (!patch) return;
+    if (patch.amount) setAmount(patch.amount.includes('.') ? patch.amount : `${patch.amount}.00`);
+    if (patch.merchant) setMerchant(patch.merchant);
+    if (patch.selected?.id) setPotId(patch.selected.id);
+    if (patch.paymentMethod) setPaymentMethod(patch.paymentMethod);
+    userTouchedCategoryRef.current = true;
+  }, [pots]);
 
   const lookupLastSpend = useCallback(async (merchantId) => {
     if (merchantId == null || isIncome) {
@@ -243,6 +264,17 @@ function Add({ navigation, route }) {
   const selected = pots.find(p => p.id === potId);
   const itemsSum = useMemo(() => rowsTotal(rows), [rows]);
 
+  // 5.A.06 — live carbon preview for the tile. Quick mode uses the typed
+  // amount; detailed mode uses the running items sum so the figure tracks
+  // the row edits. Re-runs only when its inputs change; the helper itself
+  // is O(1) so cost is negligible per keystroke.
+  const carbonPreview = useMemo(() => {
+    if (!settings.carbon_tracking || !selected) return 0;
+    const amt = mode === 'detailed' ? itemsSum : parseFloat(amount);
+    return estimateCarbon(selected, amt);
+  }, [settings.carbon_tracking, selected, mode, amount, itemsSum]);
+  const carbonLabel = carbonImpactLabel(carbonPreview) || 'low impact ✿';
+
   const save = async () => {
     if (!merchant.trim()) {
       return Alert.alert(kind === 'income' ? 'Enter a source' : 'Enter a merchant name');
@@ -282,7 +314,7 @@ function Add({ navigation, route }) {
           merchant_id: pickedMerchantIdRef.current ?? undefined,
           amount: parseFloat(amount),
           mood: moodOn ? MOODS[moodIdx] : null,
-          carbon: settings.carbon_tracking ? 0.4 : 0,
+          carbon: settings.carbon_tracking ? estimateCarbon(selected, parseFloat(amount)) : 0,
           recurring,
           payment_method: paymentMethod,
           tags: tagNames,
@@ -315,7 +347,7 @@ function Add({ navigation, route }) {
           merchant_id: pickedMerchantIdRef.current ?? undefined,
           amount: total,
           mood: moodOn ? MOODS[moodIdx] : null,
-          carbon: settings.carbon_tracking ? 0.4 : 0,
+          carbon: settings.carbon_tracking ? estimateCarbon(selected, total) : 0,
           recurring,
           payment_method: paymentMethod,
           tags: tagNames,
@@ -421,6 +453,35 @@ function Add({ navigation, route }) {
       <ScrollView style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: (!isIncome && mode === 'detailed') ? insets.bottom + 100 : 12 }}>
+
+        {/* PS-09 — Quick-Entry Template chips. Hidden on income (templates
+            are expense-only) and when no templates exist. */}
+        {!isIncome && templates.length > 0 && (
+          <View style={{ marginTop: 10, marginBottom: 4 }}>
+            <Text style={{ fontSize: 10, color: F.ink3, textTransform: 'uppercase',
+              letterSpacing: 0.6, marginBottom: 6 }}>
+              Quick templates
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+              {templates.map((t) => (
+                <TouchableOpacity
+                  key={`tmpl-${t.id}`}
+                  onPress={() => applyTemplate(t)}
+                  activeOpacity={0.7}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
+                    backgroundColor: F.cream, borderWidth: 1, borderColor: F.line }}>
+                  <Text style={{ fontSize: 14 }}>{t.icon || '🧷'}</Text>
+                  <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>{t.label}</Text>
+                  <Text style={{ fontSize: 11, color: F.ink3 }}>
+                    {sym}{Math.round(t.amount).toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {(isIncome || mode === 'quick') ? (
           <View style={{ backgroundColor: F.cream, borderRadius: 24, padding: 24, marginTop: 16,
@@ -540,8 +601,10 @@ function Add({ navigation, route }) {
               {settings.carbon_tracking ? (
                 <View style={{ flex: 1, backgroundColor: F.mint, borderRadius: 18, padding: 14 }}>
                   <Text style={{ fontSize: 11, color: F.ink2 }}>🌱 Carbon</Text>
-                  <Text style={{ fontSize: 20, color: F.sageD, marginTop: 6 }}>0.4 kg</Text>
-                  <Text style={{ fontSize: 10, color: F.ink3 }}>low impact ✿</Text>
+                  <Text style={{ fontSize: 20, color: F.sageD, marginTop: 6 }}>
+                    {carbonPreview > 0 ? `${carbonPreview} kg` : '—'}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: F.ink3 }}>{carbonLabel}</Text>
                 </View>
               ) : <View style={{ flex: 1 }}/>}
               <TouchableOpacity onPress={() => setRecurring(!recurring)}

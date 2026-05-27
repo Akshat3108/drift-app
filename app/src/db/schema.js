@@ -1155,6 +1155,165 @@ CREATE INDEX IF NOT EXISTS idx_csv_imports_date
   ON csv_imports(imported_at DESC);
 `;
 
+// v39 — Phase 5 / 8.6 receipt image pipeline. `receipt_image_hash` carries the
+// SHA-1 (hex) of the WebP full-size bytes, distinct from `receipt_hash` (the
+// parser-side fingerprint used by 4.14 dedup — text/content-derived). Partial
+// index because rows pre-dating 8.6 (and the legacy receipt_uri-only rows that
+// haven't lazy-migrated yet) carry NULL here; 8.7's maintenance job can
+// backfill later. No UNIQUE: two scans of the same paper bill that produce
+// identical bytes are deliberately allowed to coexist (per 8.6 dedup-policy
+// decision: store-only, no save-time block).
+const V39_SQL = `
+ALTER TABLE expenses ADD COLUMN receipt_image_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_exp_receipt_img_hash
+  ON expenses(receipt_image_hash) WHERE receipt_image_hash IS NOT NULL;
+`;
+
+// v40 — Phase 5 / 8.7 maintenance job timestamp. Single TEXT (ISO-8601)
+// column on settings carries the last-successful-run wall-clock. The 24h
+// rate-limit gate in maintenance/index.js compares Date.parse(this column)
+// against Date.now(). NULL = never run; first bg→fg fires it.
+const V40_SQL = `
+ALTER TABLE settings ADD COLUMN last_maintenance_at TEXT;
+`;
+
+// v41 — Phase 5 / 8.11 biometric app lock toggle. Single boolean column on
+// settings; gate logic + native auth live in app/src/features/lock/. Default
+// 0 so existing installs see no behaviour change until the user opts in via
+// the Security row in Profile. Re-lock policy is fixed (cold start + every
+// bg→fg) per the 8.11 scoping decision, so no second column.
+const V41_SQL = `
+ALTER TABLE settings ADD COLUMN app_lock_enabled INTEGER NOT NULL DEFAULT 0;
+`;
+
+// v42 — Phase 5 / 8.10 perf observability. Two tables:
+//   db_stats     — aggregate per-label counters (call_count, total_ms,
+//                  max_ms, slow_count, last_run_at). Cheap upsert per query;
+//                  always-on in dev AND release builds so the Diagnostics
+//                  screen has data when tap-debugging a production install.
+//   db_slow_log  — per-call SQL + duration for queries above the slow
+//                  threshold (50 ms). Dev-only writes — release builds skip
+//                  the row insert to avoid persisting user SQL (which may
+//                  include merchant names) on disk in plaintext.
+// The maintenance job trims db_slow_log to the last 500 rows daily.
+const V42_SQL = `
+CREATE TABLE IF NOT EXISTS db_stats (
+  label        TEXT PRIMARY KEY,
+  call_count   INTEGER NOT NULL DEFAULT 0,
+  total_ms     INTEGER NOT NULL DEFAULT 0,
+  max_ms       INTEGER NOT NULL DEFAULT 0,
+  slow_count   INTEGER NOT NULL DEFAULT 0,
+  last_run_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS db_slow_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  sql          TEXT NOT NULL,
+  duration_ms  INTEGER NOT NULL,
+  occurred_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_db_slow_log_at ON db_slow_log(occurred_at DESC);
+`;
+
+// v43 — Phase 5 / 5.F.01 archive mode (year-10+ contingency).
+// Two cold-storage tables that mirror `expenses` and `receipt_items` column-for-column
+// as of v42. Populated by the yearly `archiveOldRows` maintenance task; never written
+// to from any user-facing repo. Read by the AllExpenses "View archive" toggle through
+// expenses.listArchive().
+//
+// Design notes:
+// - id is a plain INTEGER PRIMARY KEY (no AUTOINCREMENT). We always supply the original
+//   expenses.id / receipt_items.id so historical PKs survive the move — preserves
+//   future linkability to settled rows in account_transactions/goal_contributions whose
+//   expense_id was SET NULL on delete.
+// - No FK constraints on these tables. archive_receipt_items.expense_id is a plain
+//   INTEGER pointing at archive_expenses.id by convention (not enforced) — binding a
+//   second FK against the same id space would force two delete behaviours on the live
+//   row and complicate the move op.
+// - month_key stays a VIRTUAL generated column so archive queries can use the same
+//   indexing pattern as live.
+// - Indexes are minimal (date + month_key on archive_expenses, expense_id join on
+//   archive_receipt_items). Archive is read-rarely; we don't pay for indexes that
+//   active queries pay for.
+// - settings.last_archive_at is the 365-day gate for archiveOldRows. NULL on existing
+//   installs = treat as never-run; first bg→fg after this migration fires the task,
+//   which then stamps the column.
+//
+// MAINTENANCE WARNING: any future ALTER TABLE that adds a column to `expenses` or
+// `receipt_items` MUST also ALTER the corresponding archive_* table (same column,
+// same type, no NOT NULL unless backfillable) AND update the INSERT column lists
+// in maintenance/tasks/archiveOldRows.js. The validation harness (drift_5f01_validate.mjs
+// when re-run) asserts column count parity.
+const V43_SQL = `
+CREATE TABLE IF NOT EXISTS archive_expenses (
+  id                   INTEGER PRIMARY KEY,
+  category_id          INTEGER,
+  merchant             TEXT NOT NULL,
+  amount               REAL NOT NULL,
+  mood                 TEXT,
+  carbon               REAL NOT NULL DEFAULT 0,
+  recurring            INTEGER NOT NULL DEFAULT 0,
+  notes                TEXT,
+  receipt_uri          TEXT,
+  expense_date         TEXT NOT NULL,
+  created_at           TEXT NOT NULL,
+  deleted_at           TEXT,
+  month_key            TEXT GENERATED ALWAYS AS (substr(expense_date, 1, 7)) VIRTUAL,
+  merchant_id          INTEGER,
+  account_id           INTEGER,
+  trip_id              INTEGER,
+  subscription_id      INTEGER,
+  currency             TEXT,
+  amount_home          REAL,
+  fx_rate              REAL,
+  receipt_path         TEXT,
+  receipt_thumb        TEXT,
+  receipt_bytes        INTEGER,
+  receipt_hash         TEXT,
+  receipt_soft_hash    TEXT,
+  gstin                TEXT,
+  invoice_number       TEXT,
+  cgst                 REAL,
+  sgst                 REAL,
+  igst                 REAL,
+  payment_method       TEXT,
+  emi_loan_id          INTEGER,
+  receipt_image_hash   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_arc_exp_date  ON archive_expenses(expense_date DESC);
+CREATE INDEX IF NOT EXISTS idx_arc_exp_month ON archive_expenses(month_key);
+
+CREATE TABLE IF NOT EXISTS archive_receipt_items (
+  id              INTEGER PRIMARY KEY,
+  expense_id      INTEGER NOT NULL,
+  name            TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  qty             REAL NOT NULL,
+  unit            TEXT NOT NULL,
+  canonical_qty   REAL NOT NULL,
+  canonical_unit  TEXT NOT NULL,
+  unit_price      REAL NOT NULL,
+  price           REAL NOT NULL,
+  purchase_date   TEXT NOT NULL,
+  deleted_at      TEXT,
+  month_key       TEXT GENERATED ALWAYS AS (substr(purchase_date, 1, 7)) VIRTUAL,
+  product_id      INTEGER,
+  hsn             TEXT,
+  cgst_rate       REAL,
+  sgst_rate       REAL,
+  igst_rate       REAL,
+  batch_no        TEXT,
+  expiry_date     TEXT,
+  mfg_date        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_arc_items_expense ON archive_receipt_items(expense_id);
+
+ALTER TABLE settings ADD COLUMN last_archive_at TEXT;
+`;
+
 // v29 — Phase 4 / 7.3 tags.
 // `tags` is a small user-owned reference table with case-insensitive
 // uniqueness (NOCASE collation + partial UNIQUE WHERE deleted_at IS NULL),
@@ -1261,6 +1420,180 @@ CREATE TABLE IF NOT EXISTS receipt_templates (
   created_at         TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
+`;
+
+// v44 — PS-09 Quick-Entry Templates. New `expense_templates` table backs the
+// horizontal chip row on the Add screen (1-tap prefill of amount + merchant +
+// category + payment method). `default_day_of_month` is reserved for a future
+// auto-create-on-day-X scheduler — column ships now so the scheduler task can
+// land without an additional migration. payment_method shares the same CHECK
+// enum as expenses.payment_method (v22). Soft-delete via `deleted_at` keeps the
+// table's lifecycle consistent with every other user-owned mutable table since
+// v2; partial index `idx_templates_sort` keeps the chip-row read cheap.
+const V44_SQL = `
+CREATE TABLE IF NOT EXISTS expense_templates (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  label                 TEXT NOT NULL,
+  amount                REAL NOT NULL,
+  category_id           INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  payment_method        TEXT
+    CHECK (payment_method IS NULL
+        OR payment_method IN ('cash','upi','card','wallet','other')),
+  default_day_of_month  INTEGER,
+  icon                  TEXT NOT NULL DEFAULT '🧷',
+  sort_order            INTEGER NOT NULL DEFAULT 0,
+  deleted_at            TEXT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_templates_sort
+  ON expense_templates(sort_order, id) WHERE deleted_at IS NULL;
+`;
+
+// v46 — PS-11 Insurance premium tracker. New `insurance_policies` table +
+// `expenses.insurance_policy_id` FK so premium payments link back to the
+// policy. `kind` covers life | term | health | vehicle | other.
+// `premium_frequency` is the billing cadence; `next_due` is the YYYY-MM-DD
+// of the upcoming premium and drives a scheduled notification via the 7.1
+// scheduler. `sum_assured` is informational; `maturity_date` is optional
+// (term/vehicle have none). `account_id` is the linked debit source (the
+// asset/liability tracking the premium); SET NULL on account delete keeps
+// the policy around. Soft-delete via `deleted_at`.
+//
+// Adding `expenses.insurance_policy_id` as a nullable FK with SET NULL on
+// policy delete (same convention as expenses.emi_loan_id from 7.5).
+// Partial indexes keep the live-list read on policies and the per-policy
+// linked-expenses count cheap.
+
+// v45 — PS-10 Investment holdings. Manual-entry portfolio (no online price
+// fetch — Rule 5 keeps Drift offline-first). One row per holding; `kind`
+// covers mf | equity | gold | fd | rd | nps | ppf | other. `units` is in the
+// natural unit for the kind (MF/equity = units/shares, gold = grams, FD/RD
+// = 1 with unit_cost = principal, NPS/PPF = 1 with unit_cost = corpus).
+// `unit_cost` is the average buy price (cost basis); `current_nav` is the
+// last user-entered market value per unit. `last_updated` is the YYYY-MM-DD
+// the user last refreshed the NAV — drives the monthly NAV-update reminder
+// in features/notifications. `account_id` is the linking account (e.g.
+// "Zerodha Demat" as an asset account); SET NULL on account delete keeps
+// the holding around. Soft-delete via `deleted_at`. Partial index keeps
+// the live list read cheap.
+const V45_SQL = `
+CREATE TABLE IF NOT EXISTS holdings (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind          TEXT NOT NULL
+    CHECK (kind IN ('mf','equity','gold','fd','rd','nps','ppf','other')),
+  label         TEXT NOT NULL,
+  units         REAL NOT NULL DEFAULT 0,
+  unit_cost     REAL NOT NULL DEFAULT 0,
+  current_nav   REAL NOT NULL DEFAULT 0,
+  last_updated  TEXT,
+  account_id    INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+  notes         TEXT,
+  icon          TEXT NOT NULL DEFAULT '📈',
+  color         TEXT NOT NULL DEFAULT '#6a8d73',
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  deleted_at    TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_holdings_live
+  ON holdings(sort_order, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_holdings_account
+  ON holdings(account_id) WHERE deleted_at IS NULL AND account_id IS NOT NULL;
+`;
+
+// v49 — PS-21 Privacy mask mode + FLAG_SECURE. Three new boolean settings:
+//   - `privacy_block_screenshots`    → toggle for native FLAG_SECURE (read
+//                                       by MainActivity.onCreate at app
+//                                       start; takes effect after restart).
+//   - `privacy_hide_on_minimize`     → PrivacyContext flips amountsHidden
+//                                       true when AppState !== 'active'.
+//   - `privacy_mask_amounts_always`  → amountsHidden permanently true.
+// Defaults 0 so existing installs see no UX change until opted in.
+const V49_SQL = `
+ALTER TABLE settings ADD COLUMN privacy_block_screenshots   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE settings ADD COLUMN privacy_hide_on_minimize    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE settings ADD COLUMN privacy_mask_amounts_always INTEGER NOT NULL DEFAULT 0;
+`;
+
+// v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
+// vehicle, identified by the tag_id printed on the sticker). `current_balance`
+// is the last-known wallet balance from a recharge / CSV import / manual
+// edit; `last_synced` stamps when. A FASTag toll transaction lands as an
+// `expenses` row with both `vehicle_id` set (matches 7.6's column) AND
+// `fastag_account_id` pointing here — the latter lets the FASTag detail
+// screen scope its list without forcing a vehicle filter.
+const V48_SQL = `
+CREATE TABLE IF NOT EXISTS fastag_accounts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id      INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+  tag_id          TEXT,
+  bank            TEXT,
+  label           TEXT NOT NULL,
+  current_balance REAL NOT NULL DEFAULT 0,
+  last_synced     TEXT,
+  notes           TEXT,
+  icon            TEXT NOT NULL DEFAULT '🛣️',
+  color           TEXT NOT NULL DEFAULT '#b09c8a',
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  deleted_at      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fastag_live
+  ON fastag_accounts(sort_order, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_fastag_vehicle
+  ON fastag_accounts(vehicle_id) WHERE deleted_at IS NULL AND vehicle_id IS NOT NULL;
+
+ALTER TABLE expenses ADD COLUMN fastag_account_id INTEGER
+  REFERENCES fastag_accounts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_exp_fastag_account
+  ON expenses(fastag_account_id) WHERE fastag_account_id IS NOT NULL;
+`;
+
+// v47 — PS-12 EMI tax-benefit metadata. Two new columns on emi_loans:
+//   - `kind`: enum (home | car | personal | education). Drives the
+//             TaxBenefit screen's 80C/24B applicability logic. Default
+//             'other' on legacy rows means the user must explicitly mark
+//             their home loan to get the benefit calculation.
+//   - `tax_eligible`: explicit boolean override so the user can flag a
+//             non-home loan as 80C-eligible (e.g. let-out property) or
+//             un-flag a home loan held in a non-eligible structure.
+//             NULL = follow the implicit rule (home loan = eligible).
+const V47_SQL = `
+ALTER TABLE emi_loans ADD COLUMN kind TEXT
+  CHECK (kind IS NULL OR kind IN ('home','car','personal','education','other'));
+ALTER TABLE emi_loans ADD COLUMN tax_eligible INTEGER;
+`;
+
+const V46_SQL = `
+CREATE TABLE IF NOT EXISTS insurance_policies (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind                TEXT NOT NULL
+    CHECK (kind IN ('life','term','health','vehicle','other')),
+  label               TEXT NOT NULL,
+  provider            TEXT,
+  premium_amount      REAL NOT NULL DEFAULT 0,
+  premium_frequency   TEXT NOT NULL DEFAULT 'yearly'
+    CHECK (premium_frequency IN ('monthly','quarterly','half_yearly','yearly')),
+  next_due            TEXT,
+  sum_assured         REAL,
+  maturity_date       TEXT,
+  account_id          INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+  policy_number       TEXT,
+  notes               TEXT,
+  icon                TEXT NOT NULL DEFAULT '🛡️',
+  color               TEXT NOT NULL DEFAULT '#a3c7e9',
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  deleted_at          TEXT,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_insurance_live
+  ON insurance_policies(sort_order, id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_insurance_due
+  ON insurance_policies(next_due) WHERE deleted_at IS NULL AND next_due IS NOT NULL;
+
+ALTER TABLE expenses ADD COLUMN insurance_policy_id INTEGER
+  REFERENCES insurance_policies(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_exp_insurance_policy
+  ON expenses(insurance_policy_id) WHERE insurance_policy_id IS NOT NULL;
 `;
 
 export const migrations = [
@@ -1457,6 +1790,61 @@ export const migrations = [
     name: 'csv-imports',
     up: async (db) => { await db.execAsync(V38_SQL); },
   },
+  {
+    version: 39,
+    name: 'receipt-image-hash',
+    up: async (db) => { await db.execAsync(V39_SQL); },
+  },
+  {
+    version: 40,
+    name: 'settings-last-maintenance-at',
+    up: async (db) => { await db.execAsync(V40_SQL); },
+  },
+  {
+    version: 41,
+    name: 'settings-app-lock-enabled',
+    up: async (db) => { await db.execAsync(V41_SQL); },
+  },
+  {
+    version: 42,
+    name: 'perf-db-stats',
+    up: async (db) => { await db.execAsync(V42_SQL); },
+  },
+  {
+    version: 43,
+    name: 'archive-expenses-and-items',
+    up: async (db) => { await db.execAsync(V43_SQL); },
+  },
+  {
+    version: 44,
+    name: 'expense-templates',
+    up: async (db) => { await db.execAsync(V44_SQL); },
+  },
+  {
+    version: 45,
+    name: 'investment-holdings',
+    up: async (db) => { await db.execAsync(V45_SQL); },
+  },
+  {
+    version: 46,
+    name: 'insurance-policies',
+    up: async (db) => { await db.execAsync(V46_SQL); },
+  },
+  {
+    version: 47,
+    name: 'emi-loans-tax-metadata',
+    up: async (db) => { await db.execAsync(V47_SQL); },
+  },
+  {
+    version: 48,
+    name: 'fastag-accounts',
+    up: async (db) => { await db.execAsync(V48_SQL); },
+  },
+  {
+    version: 49,
+    name: 'privacy-settings',
+    up: async (db) => { await db.execAsync(V49_SQL); },
+  },
 ];
 
 // Tables present after v1 — used by the legacy-stamp detection in runMigrations()
@@ -1480,7 +1868,17 @@ export const TABLES = [
   // AND expenses (FK CASCADE via UNIQUE expense_id). Children-first wipe
   // order requires utility_bills before both parents.
   'utility_bills',
-  'receipt_items', 'expenses', 'income', 'categories',
+  'receipt_items', 'expenses',
+  // 5.F.01 — archive_* tables are populated by maintenance/tasks/archiveOldRows.
+  // No FK to live tables, but archive_receipt_items references archive_expenses by
+  // integer id, so children-first wipe ordering still applies for consistency.
+  'archive_receipt_items', 'archive_expenses',
+  // PS-09 — expense_templates is a child of categories (FK ON DELETE SET NULL).
+  // Children-first wipe order requires it before `categories`, even though
+  // SET NULL would tolerate the reverse — keeps the convention consistent
+  // with every other category-child table in this list.
+  'expense_templates',
+  'income', 'categories',
   'subscriptions', 'goals',
   // 7.5 — emi_loans is a parent of expenses (expenses.emi_loan_id → emi_loans.id
   // ON DELETE SET NULL). Wiped after expenses so the FK SET NULL trigger is a no-op
@@ -1528,8 +1926,25 @@ export const TABLES = [
   'utility_accounts',
   // 7.13 — account_snapshots has no FK; place near other audit-style tables.
   'account_snapshots',
+  // PS-10 — holdings is a child of accounts (FK ON DELETE SET NULL). Wiped
+  // BEFORE accounts so the FK SET NULL on cascade is a no-op (rows already
+  // gone). Children-first convention preserved even though SET NULL would
+  // tolerate the reverse order.
+  'holdings',
+  // PS-11 — insurance_policies is a child of accounts (FK ON DELETE SET NULL).
+  // It is also a parent of expenses.insurance_policy_id (FK SET NULL), but
+  // expenses already drained above, so wiping insurance_policies here is safe.
+  'insurance_policies',
+  // PS-13 — fastag_accounts is a child of vehicles (FK SET NULL) and a parent
+  // of expenses.fastag_account_id (FK SET NULL). Expenses already drained
+  // above, so wiping fastag_accounts here is safe.
+  'fastag_accounts',
   // 7.15 — csv_imports is a pure audit table, no FKs.
   'csv_imports',
+  // 8.10 — perf observability. Pure audit tables, no FKs; wiped on resetAll
+  // so a factory reset also clears stale perf history (otherwise the
+  // Diagnostics screen would still surface pre-reset slow queries).
+  'db_slow_log', 'db_stats',
   'accounts', 'settings', 'profile',
 ];
 

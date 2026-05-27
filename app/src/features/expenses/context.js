@@ -51,32 +51,45 @@ export function ExpensesProvider({ children }) {
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState({ pots: [], totalSpend: 0, monthBudget: 0 });
   const [ready, setReady] = useState(false);
+  // PS-05 — global "viewing" month. Mutation paths still anchor to the real
+  // current month via `currentMonthKey()` below; this state only steers the
+  // read path (summaryByCategory + the screens that subscribe via useApp).
+  const [activeMonth, setActiveMonth] = useState(() =>
+    new Date().toISOString().slice(0, 7)
+  );
   const notifyBus = useNotifyBus();
 
   // 7.10 — ensure rollover for the current month before summarising. Idempotent.
   // No-op when no category has rollover_enabled or when prior history is absent.
+  // Always uses the real current month — rollover is a write that must not
+  // shift just because the user is browsing history.
   const currentMonthKey = () => new Date().toISOString().slice(0, 7);
+
+  const resetActiveMonth = useCallback(() => {
+    setActiveMonth(currentMonthKey());
+  }, []);
 
   const refreshSummary = useCallback(async () => {
     await rolloverRepo.ensureRolloverForMonth(currentMonthKey()).catch(() => {});
-    const rows = await expRepo.summaryByCategory();
+    const rows = await expRepo.summaryByCategory(activeMonth);
     setSummary(summaryFromRows(rows));
     // 7.1 — let the notifications provider re-evaluate budget thresholds against
     // the freshly-rolled pot totals. Fire-and-forget; provider de-bounces its
-    // own work via the dedupe index.
+    // own work via the dedupe index. Notifications still target the real
+    // current-month rollup; the bus event is only a "things changed" ping.
     notifyBus?.emit(NOTIFY_EVENTS.EXPENSE_CHANGED);
-  }, [notifyBus]);
+  }, [notifyBus, activeMonth]);
 
   const refresh = useCallback(async () => {
     await rolloverRepo.ensureRolloverForMonth(currentMonthKey()).catch(() => {});
     const [e, sumRows] = await Promise.all([
       expRepo.list({ limit: EXPENSES_LIMIT }),
-      expRepo.summaryByCategory(),
+      expRepo.summaryByCategory(activeMonth),
     ]);
     setExpenses(e);
     setSummary(summaryFromRows(sumRows));
     notifyBus?.emit(NOTIFY_EVENTS.EXPENSE_CHANGED);
-  }, [notifyBus]);
+  }, [notifyBus, activeMonth]);
 
   useEffect(() => {
     (async () => { await refresh(); setReady(true); })();
@@ -151,6 +164,13 @@ export function ExpensesProvider({ children }) {
     return n;
   }, [refresh]);
 
+  // PS-07 — batch trip-tag. `trip_id = null` clears the tag.
+  const bulkRetripExpenses = useCallback(async (ids, trip_id) => {
+    const n = await expRepo.bulkUpdateTrip(ids, trip_id);
+    await refresh();
+    return n;
+  }, [refresh]);
+
   const addExpenseWithItems = useCallback(async ({ expense, items }) => {
     // 7.3 — tags come through on the expense slice; pull them out before
     // createWithItems writes the row (its INSERT doesn't know about tags).
@@ -202,9 +222,16 @@ export function ExpensesProvider({ children }) {
     pots: summary.pots,
     totalSpend: summary.totalSpend,
     monthBudget: summary.monthBudget,
+    // PS-05 — global month selector. Screens that show month-scoped data
+    // (Home, Trends, PS-01..PS-03) should read this and re-fetch when it
+    // changes; mutation paths and notifications continue to anchor on the
+    // literal current month.
+    activeMonth,
+    setActiveMonth,
+    resetActiveMonth,
     refreshSummary,
     addExpense, updateExpense, removeExpense, restoreExpense,
-    bulkRemoveExpenses, bulkRestoreExpenses, bulkRecategorizeExpenses,
+    bulkRemoveExpenses, bulkRestoreExpenses, bulkRecategorizeExpenses, bulkRetripExpenses,
     addExpenseWithItems, updateExpenseWithItems,
     // read-only repo methods exposed so 2.10 can drop `useApp().repos.expenses.*`
     monthlyTrend: (...a) => expRepo.monthlyTrend(...a),

@@ -1234,7 +1234,19 @@ function findBillBands(rows, totalY) {
 //     comparison (probe vs templated overall confidence) is the CALLER'S
 //     job — parseReceipt itself is pure; it just produces the templated
 //     parse if asked.
-export function parseReceipt(ocrResultOrLines, options = {}) {
+// 8.5 — `parseReceipt` is async and yields the JS thread between its four
+// heaviest stages so the UI can paint mid-parse. Two new options:
+//   `yieldFn`: () => Promise<void>  — caller-supplied yield primitive.
+//              ScanService injects an InteractionManager-backed yielder;
+//              Node validation harnesses can omit it (defaults to no-op
+//              so `parseReceipt.js` stays free of `react-native` imports).
+//   `signal`:  { throwIfCancelled(): void } — caller-supplied cancel hook.
+//              Called after each yield. The parser doesn't own the error
+//              type; it just lets whatever the signal throws propagate
+//              (ScanService throws `CancelledError`).
+export async function parseReceipt(ocrResultOrLines, options = {}) {
+  const yieldFn = options.yieldFn || (() => {});
+  const signal = options.signal;
   const fallbackDate = new Date().toISOString().slice(0, 10);
   const rawLines = Array.isArray(ocrResultOrLines)
     ? ocrResultOrLines
@@ -1253,6 +1265,9 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
   }
 
   const rows = mergeIntoRows(rawLines);
+  // Yield #1 — row grouping done (heaviest prep stage).
+  await yieldFn();
+  signal?.throwIfCancelled?.();
   const fullText = rows.map(r => r.text).join('\n');
 
   // ── Format ────────────────────────────────────────────────────────────
@@ -1300,6 +1315,10 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
   const invoiceNumber = extractInvoiceNumber(fullText);
   const taxBreakdown = extractTaxBreakdown(fullText);
 
+  // Yield #2 — header (format + totals + bands + metadata) done.
+  await yieldFn();
+  signal?.throwIfCancelled?.();
+
   // ── Items ─────────────────────────────────────────────────────────────
   // 4.22 — pass through learned column_map so columnar extraction can pin
   // the layout instead of re-detecting per-receipt. Templates apply only
@@ -1310,6 +1329,10 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
     { itemBandTop, itemBandBottom },
     { columnsOverride: options.template?.columnMapParsed || null }
   );
+
+  // Yield #3 — items extracted (the dominant cost on long bills).
+  await yieldFn();
+  signal?.throwIfCancelled?.();
 
   // 4.17 — disambiguate per-item combined GST rates ("GST 5%") into
   // CGST/SGST or IGST using bill-level tax presence. Intrastate bills split
@@ -1410,6 +1433,11 @@ export function parseReceipt(ocrResultOrLines, options = {}) {
     const { columns: detected } = detectColumns(bodyRowsForCap);
     parsed.columns = (detected || []).map(c => ({ x0: c.x0, x1: c.x1 }));
   }
+
+  // Yield #4 — footer cleanup (GST disambig + fallback totals + bands/cols)
+  // done; confidence scoring runs after.
+  await yieldFn();
+  signal?.throwIfCancelled?.();
 
   parsed.confidence = scoreConfidence(parsed);
   return parsed;

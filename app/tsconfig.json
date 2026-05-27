@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    // PS-18 — Pilot config. `strict` is ON so any new .ts file gets the full
+    // type-safety value; `allowJs` keeps the existing .js tree compiling
+    // alongside. `noEmit` because Metro/Babel still does the actual transform
+    // (`babel-preset-expo` already understands .ts/.tsx). This config is for
+    // editor IntelliSense + the `npm run typecheck` script only.
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2020", "DOM"],
+    "jsx": "react-native",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    // Silence the TS6+ baseUrl deprecation; we still need it for the path
+    // mappings below. Remove once paths is rewritten to absolute resolution.
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@core/*":       ["src/core/*"],
+      "@features/*":   ["src/features/*"],
+      "@ocr/*":        ["src/ocr/*"],
+      "@components/*": ["src/components/*"],
+      "@media/*":      ["src/media/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "android", "ios", "__tests__", "*.config.js"]
+}

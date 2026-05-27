@@ -184,6 +184,79 @@ function groupByMonth(rows) {
   return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
 }
 
+// PS-14 — Compute an ITR-style summary from an expense slice + optional
+// PS-11/PS-12 enrichments passed in via `meta.fyData`. Pure function so the
+// /tmp/ validator can call it without React Native.
+//
+// Inputs:
+//   expenses      — slice from expRepo.listForExport (date-range filtered)
+//   fyData        — optional { policiesPaid, loanBenefit, fyStart, fyEnd }
+//                   sourced by the Export screen for the FY presets.
+//
+// Returns:
+//   {
+//     bigSpends:    [{merchant, amount, expense_date, category_name}, …]   — > 50k
+//     gstInput:     { totalGst }                                          — best-effort
+//     section80C:   { amount, items: [{label, amount}] }                  — capped at 1.5L
+//     section80D:   { amount, items: [{label, amount}] }                  — capped at 25k (display only; user-side adjustment)
+//     section24B:   { amount, items: [{label, amount}] }                  — capped at 2L
+//   }
+//
+// GST input credit: existing schema does NOT track GST per expense beyond
+// what 5.11 may have persisted. We sum any column named `gst_amount` or
+// `tax_amount` if the slice carries one; otherwise reports as 0. The PDF
+// will note this clearly.
+export function fyTaxSummary({ expenses, fyData, sym = '₹' }) {
+  const expRows = expenses || [];
+  const big = expRows
+    .filter(e => Number(e.amount) > 50000)
+    .sort((a, b) => Number(b.amount) - Number(a.amount));
+
+  let totalGst = 0;
+  for (const e of expRows) {
+    const g = Number(e.gst_amount) || Number(e.tax_amount) || 0;
+    if (g > 0) totalGst += g;
+  }
+
+  // 80C: insurance premiums paid (life/term/health) + loan principal (kind:home, tax_eligible).
+  // 80D: health insurance premiums paid.
+  // 24B: home-loan interest (kind:home, tax_eligible).
+  const policiesPaid = fyData?.policiesPaid || []; // [{ kind, label, paid }]
+  const loanBenefit  = fyData?.loanBenefit  || []; // [{ name, principal, interest, eligible }]
+
+  const section80C = { amount: 0, items: [] };
+  const section80D = { amount: 0, items: [] };
+  for (const p of policiesPaid) {
+    if (p.kind === 'health') {
+      section80D.items.push({ label: p.label, amount: p.paid });
+      section80D.amount += p.paid;
+    } else if (p.kind === 'life' || p.kind === 'term') {
+      section80C.items.push({ label: p.label, amount: p.paid });
+      section80C.amount += p.paid;
+    }
+  }
+  const section24B = { amount: 0, items: [] };
+  for (const l of loanBenefit) {
+    if (!l.eligible) continue;
+    if (l.principal > 0) {
+      section80C.items.push({ label: `${l.name} (principal)`, amount: l.principal });
+      section80C.amount += l.principal;
+    }
+    if (l.interest > 0) {
+      section24B.items.push({ label: `${l.name} (interest)`, amount: l.interest });
+      section24B.amount += l.interest;
+    }
+  }
+
+  return {
+    bigSpends:   big,
+    gstInput:    { totalGst },
+    section80C,
+    section80D,
+    section24B,
+  };
+}
+
 // Statement-style PDF template. Inline CSS only (expo-print HTML mode doesn't
 // run external requests). The @page rules give a roughly A4 layout with a
 // repeated table header on page breaks. No images.
@@ -335,12 +408,91 @@ export function bundleToHTML({ expenses, items, income, meta, sym = '₹' }) {
       }).join('')}
     </ul>` : ''}
 
+  ${meta?.fyData ? itrSectionsHTML({ expenses: expRows, fyData: meta.fyData, sym }) : ''}
+
   ${expRows.length ? `<h2>Spends</h2>${expenseTables}` : ''}
   ${incomeTable}
   ${itemsTable}
 
   <footer>Drift · 100% offline · exported ${escapeHTML(generatedAt)}</footer>
 </body></html>`;
+}
+
+// PS-14 — Render the ITR-summary block. Only invoked when meta.fyData is
+// present (FY preset selected on Export). Caller passes fyData populated by
+// the Export screen from useInsurance() + useEmi() + taxBenefitForFY().
+function itrSectionsHTML({ expenses, fyData, sym }) {
+  const summary = fyTaxSummary({ expenses, fyData, sym });
+  const big = summary.bigSpends;
+  const cap80C = Math.min(summary.section80C.amount, 150000);
+  const cap80D = Math.min(summary.section80D.amount, 25000);
+  const cap24B = Math.min(summary.section24B.amount, 200000);
+  const savings = Math.round((cap80C + cap80D + cap24B) * 0.30);
+
+  const sectionTable = (title, ref, sec, cap) => `
+    <h3>${escapeHTML(title)} <span class="muted">(cap ${fmtAmount(cap, sym)})</span></h3>
+    <table class="ledger compact">
+      <thead><tr>
+        <th>Item</th>
+        <th class="amt">Amount paid</th>
+      </tr></thead>
+      <tbody>
+        ${sec.items.length === 0
+          ? `<tr><td colspan="2" class="muted">No eligible items recorded for this FY.</td></tr>`
+          : sec.items.map(it => `
+            <tr>
+              <td>${escapeHTML(it.label)}</td>
+              <td class="amt">${fmtAmount(it.amount, sym)}</td>
+            </tr>
+          `).join('') +
+            `<tr><td><b>Total eligible</b></td><td class="amt"><b>${fmtAmount(sec.amount, sym)}</b></td></tr>` +
+            `<tr><td><b>Capped at ${ref}</b></td><td class="amt"><b>${fmtAmount(Math.min(sec.amount, cap), sym)}</b></td></tr>`
+        }
+      </tbody>
+    </table>`;
+
+  return `
+    <h2>ITR / FY summary</h2>
+    <div class="meta">Section 80C principal+premium · Section 24B home-loan interest · Section 80D health premium.
+      GST input credit is best-effort: only entries with an explicit GST amount are summed.</div>
+
+    <div class="summary">
+      <div class="card"><div class="label">Total spends &gt; ₹50,000</div>
+        <div class="value">${big.length}</div>
+        <div class="muted">itemised below</div>
+      </div>
+      <div class="card pos"><div class="label">Est. tax savings (30% slab)</div>
+        <div class="value">${fmtAmount(savings, sym)}</div>
+        <div class="muted">capped per Section limits</div>
+      </div>
+      <div class="card"><div class="label">GST input credit</div>
+        <div class="value">${fmtAmount(summary.gstInput.totalGst, sym)}</div>
+        <div class="muted">where recorded</div>
+      </div>
+    </div>
+
+    ${sectionTable('Section 80C', '₹1,50,000', summary.section80C, 150000)}
+    ${sectionTable('Section 80D', '₹25,000',  summary.section80D, 25000)}
+    ${sectionTable('Section 24B', '₹2,00,000', summary.section24B, 200000)}
+
+    ${big.length ? `
+      <h3>Spends &gt; ₹50,000</h3>
+      <table class="ledger compact">
+        <thead><tr>
+          <th class="date">Date</th><th>Merchant</th><th>Category</th><th class="amt">Amount</th>
+        </tr></thead>
+        <tbody>
+          ${big.map(e => `
+            <tr>
+              <td class="date">${escapeHTML(e.expense_date)}</td>
+              <td>${escapeHTML(e.merchant)}</td>
+              <td>${escapeHTML(e.category_name || '')}</td>
+              <td class="amt">${fmtAmount(e.amount, sym)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>` : ''}
+  `;
 }
 
 // `drift-export-2025-06-to-2026-05.csv` — predictable, sortable, no spaces.

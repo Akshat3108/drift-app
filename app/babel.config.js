@@ -12,6 +12,7 @@ module.exports = function (api) {
             '@features': './src/features',
             '@ocr': './src/ocr',
             '@components': './src/components',
+            '@media': './src/media',
           },
         },
       ],

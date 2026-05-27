@@ -184,6 +184,152 @@ export function projectState(loan, { asOf = new Date() } = {}) {
   };
 }
 
+// PS-12 — Simulate a one-time extra principal payment after
+// `extraAfterInstallment` regular installments. The simulator keeps the
+// EMI fixed at the original amount and lets the schedule shorten as the
+// balance falls faster than the formula expected. Returns the modified
+// schedule + summary (savedInterest, monthsSaved).
+//
+// Caller passes the LOAN row (same shape used by projectState). When the
+// extra payment would zero out or overshoot the balance, the schedule is
+// truncated to the partial-pay month and the final payment closes the
+// loan exactly.
+export function simulatePrepayment(loan, { extraPrincipal, extraAfterInstallment = 0 } = {}) {
+  if (!loan) return { ready: false };
+  const baseline = projectState(loan);
+  if (!baseline.ready) return { ready: false };
+  const extra = Number(extraPrincipal) || 0;
+  if (extra <= 0) {
+    return {
+      ready: true,
+      baseline,
+      modifiedSchedule: baseline.schedule,
+      savedInterest: 0,
+      monthsSaved: 0,
+      newTenure: baseline.schedule.length,
+    };
+  }
+
+  const r = monthlyRate(loan.annual_rate_pct);
+  const emi = baseline.emiAmount;
+  const startIdx = Math.max(0, Math.min(extraAfterInstallment, baseline.schedule.length - 1));
+  // Keep the head of the baseline schedule untouched (installments already
+  // scheduled before the prepayment). Recompute from startIdx onward.
+  const modified = baseline.schedule.slice(0, startIdx).map(row => ({ ...row }));
+  let balance = startIdx === 0 ? loan.principal : modified[startIdx - 1].closing_balance;
+
+  // Apply the lump-sum AT the boundary between startIdx and startIdx+1.
+  balance = r2(balance - extra);
+  if (balance < 0) balance = 0;
+
+  // Continue paying EMI until balance hits 0; cap at baseline tenure length
+  // as a safety against floating-point drift.
+  for (let i = startIdx; i < baseline.schedule.length && balance > 0.01; i++) {
+    const opening = balance;
+    const interest = r2(balance * r);
+    let payment = emi;
+    let principal_paid = r2(payment - interest);
+    if (principal_paid >= balance || i === baseline.schedule.length - 1) {
+      principal_paid = r2(balance);
+      payment = r2(principal_paid + interest);
+    }
+    const closing = r2(balance - principal_paid);
+    // Date inheriting from baseline schedule when possible (we kept rows aligned).
+    const baseRow = baseline.schedule[i] || {};
+    modified.push({
+      installmentNumber: i + 1,
+      dueDate: baseRow.dueDate || null,
+      opening_balance: opening,
+      principal_paid,
+      interest_paid: interest,
+      payment,
+      closing_balance: closing,
+      // Mark the prepayment installment so the chart can highlight it.
+      prepayment: i === startIdx ? r2(extra) : 0,
+    });
+    balance = closing;
+  }
+
+  const baselineInterest = baseline.totalInterest;
+  let modifiedInterest = 0;
+  for (const row of modified) modifiedInterest += row.interest_paid;
+  modifiedInterest = r2(modifiedInterest);
+
+  return {
+    ready: true,
+    baseline,
+    modifiedSchedule: modified,
+    savedInterest: r2(baselineInterest - modifiedInterest),
+    monthsSaved: baseline.schedule.length - modified.length,
+    newTenure: modified.length,
+    modifiedTotalInterest: modifiedInterest,
+  };
+}
+
+// PS-12 — Tax-benefit aggregation for a single financial year.
+//
+// fyStart / fyEnd are YYYY-MM-DD strings bracketing the FY (Apr 1 .. Mar 31).
+// `loan` carries the loan row; the function projects the FY's schedule slice
+// using `start_date` + `bill_day` (the same canonical schedule projectState
+// uses). Tax eligibility follows the rule:
+//   - tax_eligible === 1 → eligible
+//   - tax_eligible === 0 → ineligible
+//   - NULL / undefined  → fall back to (kind === 'home')
+// Returns:
+//   {
+//     ready,
+//     principalPaidFY,
+//     interestPaidFY,
+//     eligible80C,            // principal (cap 1.5L at PS-14 export stage)
+//     eligible24B,            // interest (cap 2L at PS-14 export stage)
+//     savingsAt30Pct,         // rough cash savings if user is in 30% slab
+//   }
+export function taxBenefitForFY(loan, fyStart, fyEnd) {
+  if (!loan) return { ready: false };
+  const state = projectState(loan);
+  if (!state.ready) return { ready: false };
+  const fyStartT = Date.parse(fyStart);
+  const fyEndT   = Date.parse(fyEnd);
+  if (!Number.isFinite(fyStartT) || !Number.isFinite(fyEndT)) {
+    return { ready: false };
+  }
+  let principalPaidFY = 0;
+  let interestPaidFY  = 0;
+  for (const row of state.schedule) {
+    const t = Date.parse(row.dueDate);
+    if (!Number.isFinite(t)) continue;
+    if (t < fyStartT) continue;
+    if (t >= fyEndT) continue;
+    principalPaidFY += row.principal_paid;
+    interestPaidFY  += row.interest_paid;
+  }
+  const eligible = loan.tax_eligible == null
+    ? (loan.kind === 'home')
+    : !!loan.tax_eligible;
+  const eligible80C = eligible ? r2(principalPaidFY) : 0;
+  const eligible24B = eligible ? r2(interestPaidFY)  : 0;
+  // 30% slab is a rough thumb; PS-14 export will let the user adjust.
+  const savingsAt30Pct = r2((Math.min(eligible80C, 150000) + Math.min(eligible24B, 200000)) * 0.30);
+  return {
+    ready: true,
+    principalPaidFY: r2(principalPaidFY),
+    interestPaidFY:  r2(interestPaidFY),
+    eligible80C, eligible24B,
+    savingsAt30Pct,
+    eligible,
+  };
+}
+
+// PS-12 — Helper exposed to the FY export. Returns the current FY's
+// canonical bracket (Apr 1 of the current FY → Apr 1 of the next FY).
+// e.g. on 2026-05-27 returns ['2026-04-01', '2027-04-01'].
+export function fyBracketFor(date = new Date()) {
+  const y = date.getFullYear();
+  const m = date.getMonth(); // 0-based
+  const fyStartYear = m >= 3 ? y : y - 1;
+  return [`${fyStartYear}-04-01`, `${fyStartYear + 1}-04-01`];
+}
+
 // Tiny helper for the EditEMI sub-label "= X years Y months"
 export function tenureLabel(tenureMonths) {
   const n = Number(tenureMonths) || 0;

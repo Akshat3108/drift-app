@@ -30,6 +30,11 @@ const PRESETS = [
   { id: 'last3',     label: 'Last 3 months' },
   { id: 'last12',    label: 'Last 12 months' },
   { id: 'ytd',       label: 'Year to date' },
+  // PS-14 — FY (Apr 1 → Mar 31) presets for ITR-time exports. `fy_current`
+  // tracks the in-flight FY ('2026-04-01' → next Apr 1 in May-Mar 2026/27);
+  // `fy_previous` is the just-closed FY for the May-Jul tax filing window.
+  { id: 'fy_current',  label: 'Current FY (ITR)' },
+  { id: 'fy_previous', label: 'Previous FY (ITR)' },
   { id: 'all',       label: 'All time' },
   { id: 'custom',    label: 'Custom' },
 ];
@@ -60,6 +65,16 @@ function resolvePreset(id) {
   }
   if (id === 'ytd') {
     return { from: `${today.getFullYear()}-01-01`, to: isoDate(today), label: 'Year to date' };
+  }
+  if (id === 'fy_current' || id === 'fy_previous') {
+    const y = today.getFullYear();
+    const m = today.getMonth(); // 0-based; FY starts at Apr (index 3)
+    const startYear = m >= 3 ? y : y - 1;
+    const offset = id === 'fy_previous' ? -1 : 0;
+    const fyFrom = `${startYear + offset}-04-01`;
+    const fyTo   = `${startYear + 1 + offset}-03-31`;
+    const fyLabel = `FY ${startYear + offset}–${String(startYear + 1 + offset).slice(2)}`;
+    return { from: fyFrom, to: fyTo, label: fyLabel };
   }
   return { from: null, to: null, label: 'All time' };
 }
@@ -212,6 +227,42 @@ export default function Export({ navigation, route }) {
       const { expenses, items, income } = await fetchAll();
       const generatedAt = new Date().toISOString();
       const meta = { generatedAt, rangeLabel: range.label };
+
+      // PS-14 — Populate fyData when the user picked an FY preset so the
+      // PDF can render the 80C/80D/24B ITR sections. Loads from
+      // insurance + EMI repos against the FY bracket. Pure-data calls;
+      // safe to run for csv/json too but only PDF consumes it.
+      const isFyPreset = presetId === 'fy_current' || presetId === 'fy_previous';
+      if (isFyPreset && range.from && range.to) {
+        try {
+          const fyEndExclusive = (() => {
+            // For policies-paid we want < (fyEnd+1day) but our `to` is Mar 31.
+            // The repo helpers expect [from, to_exclusive) so use Apr 1.
+            const [y, m, d] = range.to.split('-').map(Number);
+            const dt = new Date(y, m - 1, d + 1);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+          })();
+          const { insuranceRepo } = require('@features/insurance/repo');
+          const policiesPaid = await insuranceRepo.premiumsByFY(range.from, fyEndExclusive);
+          const { taxBenefitForFY } = require('@features/emi/amortization');
+          const { emiRepo } = require('@features/emi/repo');
+          const loans = await emiRepo.listLive();
+          const loanBenefit = loans.map(l => {
+            const b = taxBenefitForFY(l, range.from, fyEndExclusive);
+            if (!b.ready) return null;
+            return {
+              name: l.name,
+              principal: b.principalPaidFY,
+              interest:  b.interestPaidFY,
+              eligible:  b.eligible,
+            };
+          }).filter(Boolean);
+          meta.fyData = { policiesPaid, loanBenefit, fyStart: range.from, fyEnd: fyEndExclusive };
+        } catch (e) {
+          logError('export:fyData', e);
+          // Non-fatal — PDF will still render with the base sections.
+        }
+      }
 
       if (format === 'csv') {
         const text = bundleToCSV({ expenses, items, income, meta });

@@ -1,13 +1,14 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Image, TextInput, Modal, Platform } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput, Modal, Platform } from 'react-native';
+import DriftImage from '@components/DriftImage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useApp } from '../../../hooks/useAppState';
 import { useExpenses } from '@features/expenses/context';
 import { useFuel } from '@features/fuel/context';
-import { scanAndProcess, scanAndProcessMore, recalcItem, fingerprintReceipt, softFingerprint } from '@features/scan/ScanService';
-import { persistReceipt } from '@features/scan/receiptStorage';
+import { scanAndProcess, scanAndProcessMore, recalcItem, fingerprintReceipt, softFingerprint, CancelledError } from '@features/scan/ScanService';
+import { persistReceipt } from '@media/receipts';
 import { UNIT_OPTIONS } from '@core/domain/units';
 import { PRODUCE } from '@core/domain/produce';
 import { normalizeName } from '@core/domain/normalize';
@@ -15,7 +16,7 @@ import { useToast } from '@components/Toast';
 import { writeCandidate as writeGoldenCandidate } from '@ocr/golden/capture';
 import { templates as receiptTemplates } from '@features/scan/templates.repo';
 
-function Scan({ navigation }) {
+function Scan({ navigation, route }) {
   const { F, sym, pots, addExpenseWithItems } = useApp();
   const { findDuplicate } = useExpenses();
   // 7.6 — Fuel & vehicle linkage. When the parser detects a fuel receipt and
@@ -71,6 +72,16 @@ function Scan({ navigation }) {
   const [pageCount, setPageCount] = useState(0);
   const [addingPage, setAddingPage] = useState(false);
 
+  // 8.5 — Monotonic per-scan counter. Each invocation of processImage /
+  // addPageFromPicker snapshots ++scanRequestRef.current; subsequent bumps
+  // (re-tap Scan, Reset, unmount) make every snapshot stale, which the
+  // signal below uses to throw CancelledError after the next stage yield.
+  const scanRequestRef = useRef(0);
+
+  // 8.5 — Bump the request counter when the screen unmounts so any in-flight
+  // scan is invalidated and its post-resolve state writes are dropped.
+  useEffect(() => () => { scanRequestRef.current += 1; }, []);
+
   const dateAsDate = (() => {
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       const [y, m, d] = date.split('-').map(Number);
@@ -121,12 +132,45 @@ function Scan({ navigation }) {
     if (!result.canceled && result.assets?.[0]) processImage(result.assets[0]);
   };
 
+  // PS-16 — Share-target intent (Gallery → Drift). When the user shares an
+  // image to Drift, MainActivity.kt rewrites the SEND intent into a
+  // `drift://scan?image=<encoded uri>` VIEW intent; the linking config
+  // routes us here with `route.params.image` set. Trigger the scan
+  // automatically (idempotent — clears the param via navigation.setParams).
+  const sharedImageProcessedRef = useRef(false);
+  useEffect(() => {
+    const sharedUri = route?.params?.image;
+    if (!sharedUri || sharedImageProcessedRef.current) return;
+    sharedImageProcessedRef.current = true;
+    try {
+      const decoded = typeof sharedUri === 'string' ? decodeURIComponent(sharedUri) : sharedUri;
+      processImage({ uri: decoded });
+    } catch (_) {
+      // URI unreadable — silently ignore so the user lands on the regular Scan screen.
+    }
+    // Clear so re-renders don't loop.
+    navigation?.setParams?.({ image: undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.image]);
+
   const processImage = async (asset) => {
+    // 8.5 — Stale-scan guard. Snapshot the counter; if it changes before we
+    // finish (re-tap, Reset, unmount), the signal's throwIfCancelled() pops
+    // a CancelledError on the next inter-stage yield AND the post-resolve
+    // check below drops the state writes if the parse completed between
+    // yields too quickly for the cancel to fire.
+    const requestId = ++scanRequestRef.current;
+    const signal = {
+      throwIfCancelled() {
+        if (scanRequestRef.current !== requestId) throw new CancelledError();
+      },
+    };
     setImage(asset.uri);
     setStage('scanning');
     setErrorMsg('');
     try {
-      const result = await scanAndProcess(asset.uri, pots);
+      const result = await scanAndProcess(asset.uri, pots, { signal });
+      if (scanRequestRef.current !== requestId) return;
       // 4.19 — stash raw OCR and the parser's pre-edit snapshot for the
       // golden capture pipeline. `_ocr` is the ML Kit JSON the parser ate;
       // `result` minus `_ocr` is the review payload the user will edit.
@@ -180,6 +224,9 @@ function Scan({ navigation }) {
       });
       setStage('review');
     } catch (err) {
+      // 8.5 — cancelled scans silently drop. The next scan owns the screen.
+      if (err instanceof CancelledError) return;
+      if (scanRequestRef.current !== requestId) return;
       setErrorMsg(err.message || String(err));
       setStage('error');
     }
@@ -206,9 +253,18 @@ function Scan({ navigation }) {
       : ImagePicker.launchImageLibraryAsync({ quality: 1.0 });
     const result = await picker;
     if (result.canceled || !result.assets?.[0]) return;
+    // 8.5 — same scanRequestRef as processImage so Reset / unmount / a fresh
+    // single-page scan invalidates an in-flight page-add too.
+    const requestId = ++scanRequestRef.current;
+    const signal = {
+      throwIfCancelled() {
+        if (scanRequestRef.current !== requestId) throw new CancelledError();
+      },
+    };
     setAddingPage(true);
     try {
-      const merged = await scanAndProcessMore(result.assets[0].uri, pagesRef.current, pots);
+      const merged = await scanAndProcessMore(result.assets[0].uri, pagesRef.current, pots, { signal });
+      if (scanRequestRef.current !== requestId) return;
       pagesRef.current = merged._pages || pagesRef.current;
       setPageCount(pagesRef.current.length);
 
@@ -283,9 +339,15 @@ function Scan({ navigation }) {
       };
       toast(`Page ${pagesRef.current.length} added`);
     } catch (err) {
+      // 8.5 — silent drop on cancel; the next scan / reset already owns the screen.
+      if (err instanceof CancelledError) return;
+      if (scanRequestRef.current !== requestId) return;
       Alert.alert('Could not add page', err.message || String(err));
     } finally {
-      setAddingPage(false);
+      // Only clear the addingPage spinner if this invocation is still current.
+      // A superseded run leaving setAddingPage(false) here would race with
+      // a fresh one's setAddingPage(true).
+      if (scanRequestRef.current === requestId) setAddingPage(false);
     }
   };
 
@@ -363,12 +425,18 @@ function Scan({ navigation }) {
       // with just the legacy `receipt_uri` populated (5.15 owns the
       // reader flip). Runs synchronously inline because the file paths
       // are bound into the same INSERT as the expense row.
-      const stored = expense.receipt_uri ? await persistReceipt(expense.receipt_uri) : null;
+      // 8.6 — pipeline now writes WebP into yyyy/mm partitions and returns
+      // a SHA-1 image hash. `expenseDate` drives the partition so files
+      // land alongside other receipts from the same month.
+      const stored = expense.receipt_uri
+        ? await persistReceipt(expense.receipt_uri, { expenseDate: expense.expense_date })
+        : null;
       const expenseWithStorage = stored ? {
         ...expense,
-        receipt_path: stored.path,
-        receipt_thumb: stored.thumb,
-        receipt_bytes: stored.bytes,
+        receipt_path:       stored.path,
+        receipt_thumb:      stored.thumb,
+        receipt_bytes:      stored.bytes,
+        receipt_image_hash: stored.imageHash,
       } : expense;
       // 7.6 — fuel-receipt dual-write path. When the parser detected a fuel
       // format AND the user has a vehicle selected on the chip, we route the
@@ -483,6 +551,9 @@ function Scan({ navigation }) {
   };
 
   const resetScreen = () => {
+    // 8.5 — invalidate any in-flight scan so its post-resolve state writes
+    // don't overwrite the freshly-reset screen.
+    scanRequestRef.current += 1;
     setStage('idle');
     setImage(null);
     setItems([]);
@@ -536,7 +607,7 @@ function Scan({ navigation }) {
 
       {stage === 'scanning' && (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-          {image && <Image source={{ uri: image }} style={{ width: 200, height: 260, borderRadius: 16, opacity: 0.7 }}/>}
+          {image && <DriftImage source={{ uri: image }} style={{ width: 200, height: 260, borderRadius: 16, opacity: 0.7 }}/>}
           <ActivityIndicator size="large" color={F.coral}/>
           <Text style={{ fontSize: 16, color: F.ink, fontWeight: '500' }}>Reading line items…</Text>
           <Text style={{ fontSize: 13, color: F.ink2 }}>This stays on your device</Text>

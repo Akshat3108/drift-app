@@ -12,6 +12,7 @@
 // empty-state without recomputing the gating logic.
 
 import { all, one } from '../db';
+import { getCached, SCOPES } from './cache';
 
 // ─── 6.5 — cheapestMerchantPerItem ───────────────────────────────────────
 //
@@ -304,6 +305,270 @@ export async function inflationBasket({
   };
 }
 
+// ─── 8.14 — pricePrediction ──────────────────────────────────────────────
+//
+// Per-item linear regression on (days_since_first_purchase, unit_price).
+// Goal: surface a single "next price" projection on ItemTrend for items
+// with enough history to make the slope meaningful.
+//
+// Gate: `months_observed >= MIN_MONTHS` where months_observed = distinct
+// substr(purchase_date,1,7) count. 12 months floor matches the roadmap.
+// Choosing distinct months (not row count) is robust against a "12 buys in
+// one big shop" outlier — slope on a single-day cluster would be undefined
+// or wildly noisy.
+//
+// Method: simple OLS — slope = Σ((x-x̄)(y-ȳ)) / Σ((x-x̄)²), intercept =
+// ȳ - slope·x̄. Residual sample stddev (n-2 d.f.) becomes the ±band shown
+// next to the prediction. n-2 because two parameters (slope + intercept)
+// were estimated from the same data.
+//
+// `predicted_next_date = last_seen + avg_interval_days` (same convention
+// as reorderQueue's "due" math) → predicted_next_price = intercept + slope·x.
+// Avg interval falls back to MIN_INTERVAL_DAYS when only one purchase exists
+// (degenerate, but the months_observed gate makes this unreachable in
+// practice — defensive only).
+//
+// Caching: SCOPES.ITEMS at 24h. Key includes normalized_name so each item
+// gets its own cell. The blob is tiny (~12 numbers); no LRU concern.
+
+const PREDICTION_TTL_SEC  = 24 * 3600;
+const MIN_MONTHS_PRED     = 12;
+const MIN_INTERVAL_DAYS   = 7;   // fallback when only one purchase exists
+
+export async function pricePrediction(normalizedName, { minMonths = MIN_MONTHS_PRED } = {}) {
+  if (!normalizedName || typeof normalizedName !== 'string') {
+    return { ready: false, reason: 'no_name' };
+  }
+  const key = `price_pred_v1_${normalizedName}_m${minMonths}`;
+  return getCached(key, PREDICTION_TTL_SEC,
+    () => computePricePrediction(normalizedName, minMonths),
+    { scope: SCOPES.ITEMS });
+}
+
+async function computePricePrediction(normalizedName, minMonths) {
+  const rows = await all(
+    `SELECT unit_price, purchase_date
+       FROM receipt_items
+      WHERE normalized_name = ?
+        AND deleted_at IS NULL
+        AND unit_price > 0
+      ORDER BY purchase_date ASC, id ASC`,
+    [normalizedName]
+  );
+  if (rows.length < 2) {
+    return { ready: false, reason: 'insufficient_points', points: rows.length };
+  }
+
+  const monthsSet = new Set();
+  for (const r of rows) monthsSet.add(r.purchase_date.slice(0, 7));
+  const months_observed = monthsSet.size;
+  if (months_observed < minMonths) {
+    return { ready: false, reason: 'insufficient_months',
+             months_observed, min_months: minMonths };
+  }
+
+  // Build (x = days since first purchase, y = unit_price) pairs.
+  const firstMs = parseISODate(rows[0].purchase_date);
+  if (firstMs == null) {
+    return { ready: false, reason: 'bad_first_date' };
+  }
+  const xs = new Array(rows.length);
+  const ys = new Array(rows.length);
+  for (let i = 0; i < rows.length; i++) {
+    const ms = parseISODate(rows[i].purchase_date);
+    if (ms == null) {
+      return { ready: false, reason: 'bad_date_row' };
+    }
+    xs[i] = Math.round((ms - firstMs) / 86400000);
+    ys[i] = rows[i].unit_price;
+  }
+  const n = xs.length;
+  const xMean = xs.reduce((s, v) => s + v, 0) / n;
+  const yMean = ys.reduce((s, v) => s + v, 0) / n;
+
+  let sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - xMean;
+    sxx += dx * dx;
+    sxy += dx * (ys[i] - yMean);
+  }
+  if (sxx === 0) {
+    // All purchases on the same day — slope undefined.
+    return { ready: false, reason: 'no_x_variance' };
+  }
+  const slope = sxy / sxx;
+  const intercept = yMean - slope * xMean;
+
+  // Residual stddev with (n-2) d.f. (slope + intercept consumed two).
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const fit = intercept + slope * xs[i];
+    const resid = ys[i] - fit;
+    sse += resid * resid;
+  }
+  const residual_stddev = n > 2 ? Math.sqrt(sse / (n - 2)) : 0;
+
+  // Avg interval between consecutive purchase dates (in days). Mirrors the
+  // reorderQueue logic; positive intervals only.
+  const intervals = [];
+  for (let i = 1; i < n; i++) {
+    const d = xs[i] - xs[i - 1];
+    if (d > 0) intervals.push(d);
+  }
+  const avg_interval_days = intervals.length > 0
+    ? Math.round(intervals.reduce((s, v) => s + v, 0) / intervals.length)
+    : MIN_INTERVAL_DAYS;
+
+  const lastX = xs[n - 1];
+  const nextX = lastX + avg_interval_days;
+  const last_unit_price = ys[n - 1];
+  const last_seen = rows[n - 1].purchase_date;
+  const predicted_next_price = Math.max(0, intercept + slope * nextX);
+  const predicted_next_date  = isoFromMs(firstMs + nextX * 86400000);
+
+  return {
+    ready: true,
+    normalized_name: normalizedName,
+    points: n,
+    months_observed,
+    first_seen: rows[0].purchase_date,
+    last_seen,
+    last_unit_price,
+    avg_interval_days,
+    slope_per_day: slope,
+    intercept,
+    residual_stddev,
+    predicted_next_date,
+    predicted_next_price,
+  };
+}
+
+// ─── 5.A.08 — priceElasticity ────────────────────────────────────────────
+//
+// Per-item own-price elasticity of demand. β in the log-log OLS
+//   ln(qty_m) = α + β · ln(price_m) + ε
+// where (price_m, qty_m) is one observation per calendar month: price_m =
+// AVG(unit_price) across rows in that month, qty_m = SUM(canonical_qty)
+// across rows in that month. canonical_qty (not raw qty) is used so 500g vs
+// 1kg packs of the same item are commensurable.
+//
+// Interpretation of β:
+//   β < -1   → elastic       (price ↑ 1% ⇒ qty ↓ more than 1%)
+//   -1 < β < 0 → inelastic   (price ↑ 1% ⇒ qty ↓ less than 1%)
+//   |β| ≈ 1  → unit-elastic  (within ±0.1)
+//   β > 0    → giffen        (descriptive; usually means stock-up-when-cheap
+//                             rather than true Giffen-good behaviour)
+//
+// Gate (matches 8.14 pricePrediction):
+//   - ≥ MIN_MONTHS distinct purchase months (default 12)
+//   - ≥ 2 distinct prices across those months (no x-variance ⇒ undefined β)
+//
+// Caching: SCOPES.ITEMS, 24h, keyed per normalized_name.
+
+const ELASTICITY_TTL_SEC = 24 * 3600;
+const MIN_MONTHS_ELAST   = 12;
+const UNIT_BAND          = 0.1;   // |β| within 0.9..1.1 ⇒ unit-elastic
+
+export async function priceElasticity(normalizedName, { minMonths = MIN_MONTHS_ELAST } = {}) {
+  if (!normalizedName || typeof normalizedName !== 'string') {
+    return { ready: false, reason: 'no_name' };
+  }
+  const key = `price_elasticity_v1_${normalizedName}_m${minMonths}`;
+  return getCached(key, ELASTICITY_TTL_SEC,
+    () => computePriceElasticity(normalizedName, minMonths),
+    { scope: SCOPES.ITEMS });
+}
+
+async function computePriceElasticity(normalizedName, minMonths) {
+  const rows = await all(
+    `SELECT substr(purchase_date, 1, 7) AS month_key,
+            AVG(unit_price)             AS price,
+            SUM(canonical_qty)          AS qty,
+            COUNT(*)                    AS samples,
+            MAX(purchase_date)          AS last_in_month
+       FROM receipt_items
+      WHERE normalized_name = ?
+        AND deleted_at IS NULL
+        AND unit_price    > 0
+        AND canonical_qty > 0
+      GROUP BY month_key
+      ORDER BY month_key ASC`,
+    [normalizedName]
+  );
+
+  const n = rows.length;
+  if (n < minMonths) {
+    return { ready: false, reason: 'insufficient_months',
+             n_months: n, min_months: minMonths };
+  }
+
+  // Distinct-price floor — elasticity is undefined when the item never moved
+  // in price (β denominator is 0).
+  const distinctPrices = new Set(rows.map((r) => +r.price.toFixed(4)));
+  if (distinctPrices.size < 2) {
+    return { ready: false, reason: 'no_price_variance',
+             n_months: n, distinct_prices: distinctPrices.size };
+  }
+
+  // Build log-log pairs. Both price and qty are > 0 (enforced by WHERE).
+  const xs = new Array(n);
+  const ys = new Array(n);
+  for (let i = 0; i < n; i++) {
+    xs[i] = Math.log(rows[i].price);
+    ys[i] = Math.log(rows[i].qty);
+  }
+  const xMean = xs.reduce((s, v) => s + v, 0) / n;
+  const yMean = ys.reduce((s, v) => s + v, 0) / n;
+
+  let sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - xMean;
+    const dy = ys[i] - yMean;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+  if (sxx === 0) {
+    // Defensive — distinctPrices floor should already prevent this.
+    return { ready: false, reason: 'no_log_x_variance' };
+  }
+  const beta  = sxy / sxx;
+  const alpha = yMean - beta * xMean;
+
+  // Residual sum of squares + R² + std err β (n-2 d.f.).
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const fit = alpha + beta * xs[i];
+    const r   = ys[i] - fit;
+    sse += r * r;
+  }
+  const r2           = syy > 0 ? 1 - sse / syy : 0;
+  const residualVar  = n > 2 ? sse / (n - 2) : 0;
+  const std_err_beta = sxx > 0 ? Math.sqrt(residualVar / sxx) : 0;
+
+  let kind;
+  if (beta > 0)                          kind = 'giffen';
+  else if (Math.abs(Math.abs(beta) - 1) <= UNIT_BAND) kind = 'unit_elastic';
+  else if (Math.abs(beta) > 1)           kind = 'elastic';
+  else                                   kind = 'inelastic';
+
+  const last = rows[n - 1];
+  return {
+    ready: true,
+    normalized_name: normalizedName,
+    n_months: n,
+    first_month: rows[0].month_key,
+    last_month:  last.month_key,
+    last_price:  last.price,
+    last_qty:    last.qty,
+    elasticity:  beta,
+    alpha,
+    r2,
+    std_err_beta,
+    kind,
+  };
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────
 
 function parseISODate(s) {
@@ -320,4 +585,12 @@ function parseISODate(s) {
 
 function startOfDayMs(date) {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function isoFromMs(ms) {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
 }

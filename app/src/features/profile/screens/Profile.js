@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useProfile } from '../context';
@@ -7,6 +9,10 @@ import { Toggle } from '@components/primitives/Toggle';
 import { CURRENCIES } from '@core/domain/currencies';
 import { AVATAR_CHOICES } from '@core/domain/avatars';
 import { useNotifications } from '@features/notifications/context';
+import { useToast } from '@components/Toast';
+import { createBackup, restoreBackup } from '../../../backup';
+import { BackupAuthError } from '../../../backup/crypto';
+import * as LocalAuth from '../../lock/LocalAuth';
 import {
   bundleForExport,
   clearCandidates,
@@ -51,6 +57,17 @@ function Profile({ navigation }) {
   const [goldenEnabled, setGoldenEnabledState] = useState(true);
   const [goldenCount, setGoldenCount] = useState(0);
   const [goldenBusy, setGoldenBusy] = useState(false);
+  // 8.8 — backup/restore modal state.
+  const toast = useToast();
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupPass, setBackupPass] = useState('');
+  const [backupPassConfirm, setBackupPassConfirm] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);     // { uri, name }
+  const [restorePass, setRestorePass] = useState('');
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreErr, setRestoreErr] = useState('');
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -119,6 +136,23 @@ function Profile({ navigation }) {
   const savedThisMonth = Math.max(0, monthBudget - totalSpend);
   const totalLogged = expenses.length;
 
+  // 8.10 — hidden Diagnostics entry: 5 taps on the footer within 3 s
+  // navigates to Diagnostics. Counter resets to 0 on idle timeout.
+  // Same gesture as Android's "tap Build number to enable Developer mode".
+  const footerTapsRef = useRef(0);
+  const footerTimerRef = useRef(null);
+  const onFooterTap = () => {
+    if (footerTimerRef.current) clearTimeout(footerTimerRef.current);
+    footerTapsRef.current += 1;
+    if (footerTapsRef.current >= 5) {
+      footerTapsRef.current = 0;
+      navigation.navigate('Diagnostics');
+      return;
+    }
+    footerTimerRef.current = setTimeout(() => { footerTapsRef.current = 0; }, 3000);
+  };
+  useEffect(() => () => { if (footerTimerRef.current) clearTimeout(footerTimerRef.current); }, []);
+
   const saveProfile = async () => {
     if (!name.trim()) return Alert.alert('Name required');
     await updateProfile({ name: name.trim(), avatar });
@@ -169,6 +203,115 @@ function Profile({ navigation }) {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Reset everything', style: 'destructive', onPress: () => resetApp() },
       ]);
+  };
+
+  // 8.11 — App lock toggle handler.
+  //
+  // Enable path is gated by a four-step probe:
+  //   1. native module loaded   → otherwise prompt to rebuild
+  //   2. hasHardwareAsync       → otherwise inform: device has no biometric/PIN
+  //   3. isEnrolledAsync        → otherwise send the user to OS settings
+  //   4. authenticate() once    → confirms the credential actually works before
+  //                               persisting. No state change on cancel/fail.
+  //
+  // Disable path also requires a successful authenticate() when the gate is
+  // currently engageable, so a hand-off-unlocked-phone attacker can't silently
+  // disable the lock. If the gate has become un-engageable since enable
+  // (hardware/enrolment vanished), we skip the auth so the user isn't stuck.
+  const lockEnabled = !!settings.app_lock_enabled;
+  const handleToggleLock = async (v) => {
+    if (v) {
+      if (!LocalAuth.isAvailable()) {
+        Alert.alert('App lock unavailable',
+          'Rebuild the app (npm run android) to enable app lock.');
+        return;
+      }
+      if (!(await LocalAuth.hasHardwareAsync())) {
+        Alert.alert('No biometric or PIN hardware',
+          'This device doesn\'t expose a biometric sensor or screen lock that Drift can use.');
+        return;
+      }
+      if (!(await LocalAuth.isEnrolledAsync())) {
+        Alert.alert('Set up device security first',
+          'Add a fingerprint, face, or screen lock in your device settings, then try again.');
+        return;
+      }
+      const res = await LocalAuth.authenticate({ promptMessage: 'Confirm to enable app lock' });
+      if (!res.success) return;
+      await setSetting('app_lock_enabled', 1);
+      toast('App lock enabled');
+    } else {
+      const available = LocalAuth.isAvailable();
+      const enrolled = available && (await LocalAuth.hasHardwareAsync()) && (await LocalAuth.isEnrolledAsync());
+      if (enrolled) {
+        const res = await LocalAuth.authenticate({ promptMessage: 'Confirm to disable app lock' });
+        if (!res.success) return;
+      }
+      await setSetting('app_lock_enabled', 0);
+      toast('App lock disabled');
+    }
+  };
+
+  // 8.8 — Backup handlers.
+  const handleCreateBackup = async () => {
+    if (backupBusy) return;
+    if (backupPass.length < 8) { Alert.alert('Passphrase too short', 'Use at least 8 characters.'); return; }
+    if (backupPass !== backupPassConfirm) { Alert.alert('Passphrases do not match'); return; }
+    setBackupBusy(true);
+    try {
+      const { path, bytes } = await createBackup({ passphrase: backupPass });
+      setBackupOpen(false);
+      setBackupPass(''); setBackupPassConfirm('');
+      const sizeMb = (bytes / 1024 / 1024).toFixed(2);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, {
+          mimeType: 'application/octet-stream',
+          dialogTitle: `Drift backup (${sizeMb} MB)`,
+        });
+      } else {
+        Alert.alert('Backup saved', `Wrote ${sizeMb} MB to ${path}`);
+      }
+      toast(`Backup created (${sizeMb} MB)`);
+    } catch (e) {
+      Alert.alert('Backup failed', e.message || String(e));
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handlePickRestoreFile = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (res.canceled || !res.assets?.[0]) return;
+      const a = res.assets[0];
+      setRestoreFile({ uri: a.uri, name: a.name || 'backup.driftbackup' });
+      setRestoreErr('');
+    } catch (e) {
+      Alert.alert('Could not pick file', e.message || String(e));
+    }
+  };
+
+  const handleRunRestore = async () => {
+    if (restoreBusy || !restoreFile || !restorePass) return;
+    setRestoreBusy(true);
+    setRestoreErr('');
+    try {
+      await restoreBackup({ uri: restoreFile.uri, passphrase: restorePass });
+      setRestoreOpen(false);
+      setRestoreFile(null); setRestorePass(''); setRestoreErr('');
+      toast('Restore complete');
+      // Reload — the app's state is built on a different DB now. Send the
+      // user back to the root so every provider re-mounts.
+      navigation.popToTop?.();
+    } catch (e) {
+      if (e instanceof BackupAuthError) {
+        setRestoreErr('Wrong passphrase, or the backup file was modified.');
+      } else {
+        setRestoreErr(e.message || String(e));
+      }
+    } finally {
+      setRestoreBusy(false);
+    }
   };
 
   return (
@@ -329,11 +472,45 @@ function Profile({ navigation }) {
       </View>
 
       <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
+        textTransform: 'uppercase', marginBottom: 8 }}>Security</Text>
+      <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
+        borderColor: F.line, overflow: 'hidden', marginBottom: 20 }}>
+        <Row icon="🔒" label="App lock"
+          sub={lockEnabled
+            ? 'Biometric or device PIN required on launch and resume'
+            : 'Require biometric or device PIN to open Drift'}
+          F={F}
+          right={<Toggle value={lockEnabled} onChange={handleToggleLock} F={F}/>}/>
+        {/* PS-21 — Privacy mask toggles. */}
+        <Row icon="🕶️" label="Hide amounts when minimized"
+          sub="Mask ₹ values to ₹••• in the task switcher view"
+          F={F}
+          right={<Toggle value={!!settings.privacy_hide_on_minimize}
+            onChange={(v) => setSetting('privacy_hide_on_minimize', v ? 1 : 0)} F={F}/>}/>
+        <Row icon="🚫" label="Block screenshots"
+          sub="Prevent screenshots, screen recording, and casting (requires app restart)"
+          F={F}
+          right={<Toggle value={!!settings.privacy_block_screenshots}
+            onChange={(v) => setSetting('privacy_block_screenshots', v ? 1 : 0)} F={F}/>}/>
+        <Row icon="•••" label="Mask amounts always"
+          sub="Hide every ₹ value behind ₹••• until you toggle this off"
+          F={F}
+          right={<Toggle value={!!settings.privacy_mask_amounts_always}
+            onChange={(v) => setSetting('privacy_mask_amounts_always', v ? 1 : 0)} F={F}/>}/>
+      </View>
+
+      <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
         textTransform: 'uppercase', marginBottom: 8 }}>More</Text>
       <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
         borderColor: F.line, overflow: 'hidden' }}>
         <Row icon="📤" label="Export your data" sub="CSV, JSON, or PDF · choose a date range" F={F}
           onPress={() => navigation.navigate('Export')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🎯" label="Budget setup" sub="Tune budgets across all categories" F={F}
+          onPress={() => navigation.navigate('BudgetSetup')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🧷" label="Quick templates" sub="1-tap saved expenses" F={F}
+          onPress={() => navigation.navigate('QuickTemplates')}
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         <Row icon="🗂️" label="Manage categories" F={F}
           onPress={() => navigation.navigate('EditPot')}
@@ -343,6 +520,15 @@ function Profile({ navigation }) {
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         <Row icon="🏦" label="Manage EMIs" sub="Track loans with amortization" F={F}
           onPress={() => navigation.navigate('EMI')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="📈" label="Manage investments" sub="MF, equity, gold, FD, NPS, PPF" F={F}
+          onPress={() => navigation.navigate('Holdings')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🛡️" label="Manage insurance" sub="Life, term, health, vehicle" F={F}
+          onPress={() => navigation.navigate('Insurance')}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="🛣️" label="Manage FASTag" sub="Wallet balances + toll spend" F={F}
+          onPress={() => navigation.navigate('FASTag')}
           right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
         <Row icon="⛽" label="Manage vehicles" sub="Cars, bikes, and fuel history" F={F}
           onPress={() => navigation.navigate('Vehicles')}
@@ -367,14 +553,23 @@ function Profile({ navigation }) {
             onPress={handleClearSearches}
             right={<Text style={{ fontSize: 16, color: '#e55' }}>›</Text>}/>
         )}
+        <Row icon="💾" label="Backup encrypted" sub="AES-256-GCM, share to Drive / Files" F={F}
+          onPress={() => setBackupOpen(true)}
+          right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        <Row icon="♻️" label="Restore from backup" sub="Replaces ALL current data" F={F}
+          onPress={() => setRestoreOpen(true)}
+          right={<Text style={{ fontSize: 16, color: '#e55' }}>›</Text>}/>
         <Row icon="🗑️" label="Reset all data" sub="Wipe profile + data" F={F}
           onPress={handleReset}
           right={<Text style={{ fontSize: 16, color: '#e55' }}>›</Text>}/>
       </View>
 
-      <Text style={{ textAlign: 'center', fontSize: 11, color: F.ink3, marginTop: 24 }}>
-        Drift v1.0.0 · 100% offline
-      </Text>
+      <TouchableOpacity onPress={onFooterTap} activeOpacity={1} delayPressIn={0}
+        accessibilityRole="text" accessibilityLabel="Drift version 1.0.0, 100 percent offline">
+        <Text style={{ textAlign: 'center', fontSize: 11, color: F.ink3, marginTop: 24 }}>
+          Drift v1.0.0 · 100% offline
+        </Text>
+      </TouchableOpacity>
 
       <Modal visible={editingName} animationType="slide" transparent
         onRequestClose={() => setEditingName(false)}>
@@ -423,6 +618,123 @@ function Profile({ navigation }) {
               <TouchableOpacity onPress={saveProfile}
                 style={{ flex: 2, padding: 14, borderRadius: 12, backgroundColor: F.coral, alignItems: 'center' }}>
                 <Text style={{ color: '#fff', fontWeight: '700' }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 8.8 — Backup modal */}
+      <Modal visible={backupOpen} animationType="slide" transparent
+        onRequestClose={() => !backupBusy && setBackupOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: F.bg, padding: 24,
+            borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom + 24 }}>
+            <Text style={{ fontSize: 20, color: F.ink, marginBottom: 4 }}>Create encrypted backup</Text>
+            <Text style={{ fontSize: 12, color: F.ink3, marginBottom: 16 }}>
+              Includes: database + all receipt images
+            </Text>
+            <TextInput
+              value={backupPass}
+              onChangeText={setBackupPass}
+              placeholder="Passphrase (≥ 8 characters)"
+              placeholderTextColor={F.ink3}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!backupBusy}
+              style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: F.line,
+                backgroundColor: F.surface, fontSize: 16, color: F.ink, marginBottom: 10 }}
+            />
+            <TextInput
+              value={backupPassConfirm}
+              onChangeText={setBackupPassConfirm}
+              placeholder="Confirm passphrase"
+              placeholderTextColor={F.ink3}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!backupBusy}
+              style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: F.line,
+                backgroundColor: F.surface, fontSize: 16, color: F.ink, marginBottom: 12 }}
+            />
+            <View style={{ padding: 12, borderRadius: 10, backgroundColor: '#fff4e6',
+              borderWidth: 1, borderColor: '#ffd6a0', marginBottom: 16 }}>
+              <Text style={{ fontSize: 12, color: '#a05a00' }}>
+                ⚠️ Lost passphrase = lost backup. Drift cannot recover it. Store it somewhere safe.
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity onPress={() => !backupBusy && setBackupOpen(false)}
+                disabled={backupBusy}
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: F.surface,
+                  borderWidth: 1, borderColor: F.line, alignItems: 'center', opacity: backupBusy ? 0.5 : 1 }}>
+                <Text style={{ color: F.ink, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleCreateBackup}
+                disabled={backupBusy || backupPass.length < 8 || backupPass !== backupPassConfirm}
+                style={{ flex: 2, padding: 14, borderRadius: 12, backgroundColor: F.coral,
+                  alignItems: 'center',
+                  opacity: (backupBusy || backupPass.length < 8 || backupPass !== backupPassConfirm) ? 0.5 : 1 }}>
+                {backupBusy
+                  ? <ActivityIndicator color="#fff"/>
+                  : <Text style={{ color: '#fff', fontWeight: '700' }}>Create backup</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 8.8 — Restore modal */}
+      <Modal visible={restoreOpen} animationType="slide" transparent
+        onRequestClose={() => !restoreBusy && setRestoreOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: F.bg, padding: 24,
+            borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom + 24 }}>
+            <Text style={{ fontSize: 20, color: F.ink, marginBottom: 4 }}>Restore from backup</Text>
+            <View style={{ padding: 12, borderRadius: 10, backgroundColor: '#fde8e8',
+              borderWidth: 1, borderColor: '#f5b5b5', marginVertical: 12 }}>
+              <Text style={{ fontSize: 12, color: '#a02020' }}>
+                ⚠️ This will REPLACE all current data with the backup. Cannot be undone.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={handlePickRestoreFile} disabled={restoreBusy}
+              style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: F.line,
+                backgroundColor: F.surface, marginBottom: 10, opacity: restoreBusy ? 0.5 : 1 }}>
+              <Text style={{ fontSize: 14, color: F.ink }}>
+                {restoreFile ? `📄 ${restoreFile.name}` : '📁 Pick backup file'}
+              </Text>
+            </TouchableOpacity>
+            <TextInput
+              value={restorePass}
+              onChangeText={setRestorePass}
+              placeholder="Passphrase"
+              placeholderTextColor={F.ink3}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!restoreBusy}
+              style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: F.line,
+                backgroundColor: F.surface, fontSize: 16, color: F.ink, marginBottom: 12 }}
+            />
+            {restoreErr ? (
+              <Text style={{ fontSize: 12, color: '#a02020', marginBottom: 12 }}>{restoreErr}</Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity onPress={() => !restoreBusy && setRestoreOpen(false)}
+                disabled={restoreBusy}
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: F.surface,
+                  borderWidth: 1, borderColor: F.line, alignItems: 'center', opacity: restoreBusy ? 0.5 : 1 }}>
+                <Text style={{ color: F.ink, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleRunRestore}
+                disabled={restoreBusy || !restoreFile || !restorePass}
+                style={{ flex: 2, padding: 14, borderRadius: 12, backgroundColor: '#e55',
+                  alignItems: 'center',
+                  opacity: (restoreBusy || !restoreFile || !restorePass) ? 0.5 : 1 }}>
+                {restoreBusy
+                  ? <ActivityIndicator color="#fff"/>
+                  : <Text style={{ color: '#fff', fontWeight: '700' }}>Restore</Text>}
               </TouchableOpacity>
             </View>
           </View>

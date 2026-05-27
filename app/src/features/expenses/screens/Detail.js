@@ -8,6 +8,7 @@ import { pickReceiptUri, hasReceipt as rowHasReceipt } from '@features/expenses/
 import SwipeableRow from '@components/SwipeableRow';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
+import { categoryAnomalyStats, classifyExpenseAnomaly } from '../../../analytics';
 
 const MOOD_LABELS = { '😍': 'Loved it', '😌': 'Worth it', '😐': 'Neutral', '😬': 'Unsure', '😞': 'Regret' };
 
@@ -77,6 +78,22 @@ function Detail({ route, navigation }) {
     }
   }, [e?.id, listByExpense]);
 
+  // 8.13 — Per-category anomaly flag. Load cached stats once per category +
+  // amount; null result hides the banner entirely.
+  const [anomaly, setAnomaly] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!e?.category_id || !Number.isFinite(e.amount)) { setAnomaly(null); return; }
+    categoryAnomalyStats()
+      .then((stats) => {
+        if (cancelled) return;
+        const catStats = stats?.byCategory?.[e.category_id];
+        setAnomaly(classifyExpenseAnomaly(e.amount, catStats));
+      })
+      .catch(() => { if (!cancelled) setAnomaly(null); });
+    return () => { cancelled = true; };
+  }, [e?.category_id, e?.amount]);
+
   if (!e) return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: F.bg }}>
       <Text style={{ color: F.ink2 }}>Expense not found</Text>
@@ -132,6 +149,33 @@ function Detail({ route, navigation }) {
           {e.expense_date} · {e.category_name || 'Uncategorised'}
         </Text>
       </View>
+
+      {anomaly && (
+        <View style={{
+          backgroundColor: anomaly.severity === 'severe' ? '#fee2e2' : F.surface,
+          borderRadius: 18, padding: 14, marginBottom: 12,
+          borderWidth: 1, borderColor: anomaly.severity === 'severe' ? '#fecaca' : F.coral,
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+        }}>
+          <View style={{ width: 40, height: 40, borderRadius: 20,
+            backgroundColor: anomaly.severity === 'severe' ? '#fecaca' : F.cream,
+            alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 20 }}>🔥</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600' }}>
+              Unusual for {e.category_name || 'this category'}
+            </Text>
+            <Text style={{ fontSize: 12, color: F.ink2, marginTop: 2 }}>
+              {anomaly.multiple != null
+                ? `${anomaly.multiple.toFixed(1)}× the 90-day average`
+                : `${anomaly.z.toFixed(1)}σ above typical`}
+              {' · typical '}{sym}{anomaly.mean.toFixed(0)}
+              {' (n='}{anomaly.n}{')'}
+            </Text>
+          </View>
+        </View>
+      )}
 
       {e.mood && (
         <View style={{ backgroundColor: F.surface, borderRadius: 18, padding: 16,

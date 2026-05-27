@@ -8,6 +8,10 @@ const DEFAULTS = {
   notifications_enabled: 0,
   notif_budget_threshold: 0.8,
   notif_sub_lead_days: 3,
+  app_lock_enabled: 0,
+  privacy_block_screenshots: 0,
+  privacy_hide_on_minimize: 0,
+  privacy_mask_amounts_always: 0,
 };
 
 export const settings = {
@@ -20,8 +24,11 @@ export const settings = {
     const next = { ...cur, ...patch };
     await exec(
       `INSERT INTO settings (id, currency, dark_mode, carbon_tracking, orientation_seen,
-                             notifications_enabled, notif_budget_threshold, notif_sub_lead_days)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                             notifications_enabled, notif_budget_threshold, notif_sub_lead_days,
+                             app_lock_enabled,
+                             privacy_block_screenshots, privacy_hide_on_minimize,
+                             privacy_mask_amounts_always)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          currency               = excluded.currency,
          dark_mode              = excluded.dark_mode,
@@ -29,7 +36,11 @@ export const settings = {
          orientation_seen       = excluded.orientation_seen,
          notifications_enabled  = excluded.notifications_enabled,
          notif_budget_threshold = excluded.notif_budget_threshold,
-         notif_sub_lead_days    = excluded.notif_sub_lead_days`,
+         notif_sub_lead_days    = excluded.notif_sub_lead_days,
+         app_lock_enabled       = excluded.app_lock_enabled,
+         privacy_block_screenshots   = excluded.privacy_block_screenshots,
+         privacy_hide_on_minimize    = excluded.privacy_hide_on_minimize,
+         privacy_mask_amounts_always = excluded.privacy_mask_amounts_always`,
       [
         next.currency,
         next.dark_mode ? 1 : 0,
@@ -38,6 +49,10 @@ export const settings = {
         next.notifications_enabled ? 1 : 0,
         Number.isFinite(next.notif_budget_threshold) ? next.notif_budget_threshold : 0.8,
         Number.isInteger(next.notif_sub_lead_days) ? next.notif_sub_lead_days : 3,
+        next.app_lock_enabled ? 1 : 0,
+        next.privacy_block_screenshots ? 1 : 0,
+        next.privacy_hide_on_minimize ? 1 : 0,
+        next.privacy_mask_amounts_always ? 1 : 0,
       ]
     );
     return this.get();

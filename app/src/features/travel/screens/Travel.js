@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
+import TripChip from '@features/travel/components/TripChip';
 import { CURRENCIES } from '@core/domain/currencies';
 import { daysUntil } from '@core/utils/format';
 
@@ -44,36 +45,50 @@ function Travel({ navigation }) {
   const days = tripLengthDays(trip.start_date, trip.end_date);
   const perDay = days && trip.budget ? trip.budget / days : null;
 
+  // 8.3 — stable per-chip callback. Receives trip id; we resolve the index
+  // here so TripChip stays parameter-stable across selection toggles.
+  const onChipPress = useCallback((tripId) => {
+    const idx = sorted.findIndex((t) => t.id === tripId);
+    if (idx >= 0) setTripIdx(idx);
+  }, [sorted]);
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: F.bg }}
       contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }}>
       {sorted.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingVertical: 12, gap: 8 }}>
-          {sorted.map((t, i) => {
-            const sel = i === tripIdx;
-            return (
-              <TouchableOpacity key={t.id} onPress={() => setTripIdx(i)}
-                hitSlop={{ top: 8, bottom: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel={`Trip: ${t.name}`}
-                accessibilityState={{ selected: sel }}
-                style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99,
-                  backgroundColor: sel ? F.coral : F.surface,
-                  borderWidth: 1, borderColor: sel ? F.coral : F.line }}>
-                <Text style={{ color: sel ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>{t.name}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {sorted.map((t, i) => (
+            <TripChip
+              key={t.id}
+              trip={t}
+              F={F}
+              isSelected={i === tripIdx}
+              onPress={onChipPress}
+            />
+          ))}
         </ScrollView>
       )}
 
       <TouchableOpacity
-        onPress={() => navigation.navigate('EditTrip', { id: trip.id })}
+        onPress={() => navigation.navigate('TripDetail', { tripId: trip.id })}
         activeOpacity={0.9}
         style={{ marginTop: 16, borderRadius: 26, padding: 24, marginBottom: 20,
           backgroundColor: '#e85d44' }}
       >
+        {/* PS-07 — edit chevron in the top-right preserves the EditTrip path. */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('EditTrip', { id: trip.id })}
+          activeOpacity={0.7}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Edit trip"
+          style={{ position: 'absolute', top: 14, right: 14,
+            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99,
+            backgroundColor: 'rgba(255,255,255,0.18)' }}>
+          <Text style={{ fontSize: 11, color: '#fff', fontWeight: '700' }}>✏️ edit</Text>
+        </TouchableOpacity>
+
         <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: '700',
           letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
           ✈️ {(() => { const d = daysUntil(trip.start_date); return d === null ? 'TRIP' : d < 0 ? 'IN PROGRESS' : d === 0 ? 'TODAY' : `IN ${d} DAYS`; })()}
@@ -97,7 +112,7 @@ function Travel({ navigation }) {
           ))}
         </View>
         <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 18, textAlign: 'right' }}>
-          tap to edit
+          tap for details
         </Text>
       </TouchableOpacity>
 

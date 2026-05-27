@@ -84,10 +84,30 @@ function EMI({ navigation }) {
         <Text style={{ fontSize: 42, color: F.ink, fontWeight: '400', marginBottom: 4 }}>
           {fmt(sym, totals.monthly)}<Text style={{ fontSize: 18, color: F.ink2 }}> /mo</Text>
         </Text>
-        <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 20 }}>
+        <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 12 }}>
           {loans.length} loan{loans.length === 1 ? '' : 's'} ·{' '}
           <Text style={{ color: F.coral }}>{fmt(sym, totals.outstanding)} outstanding</Text>
         </Text>
+
+        {loans.length > 0 && (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('TaxBenefit')}
+            activeOpacity={0.85}
+            accessibilityRole="button" accessibilityLabel="Open tax benefit"
+            style={{ backgroundColor: F.cream, padding: 12, borderRadius: 14,
+              flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <Text style={{ fontSize: 20 }}>🧾</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600' }}>
+                Tax benefit & prepayment simulator
+              </Text>
+              <Text style={{ fontSize: 11, color: F.ink3 }}>
+                80C / 24B for the current FY + "what if I prepay" math
+              </Text>
+            </View>
+            <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
+          </TouchableOpacity>
+        )}
 
         {loans.length === 0 && (
           <View style={{ alignItems: 'center', padding: 40, backgroundColor: F.surface,

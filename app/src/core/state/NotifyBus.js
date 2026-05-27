@@ -61,4 +61,9 @@ export const NOTIFY_EVENTS = {
   // the receipt_items AI trigger, so this event carries the snapshot the
   // checker needs).
   PRICE_OBSERVATIONS:  'price:observations',
+  // PS-11 — fired by InsuranceProvider on policy upsert/remove so the
+  // notifications layer can re-evaluate renewal reminders without waiting
+  // for a boot pass.
+  INSURANCE_UPSERTED:  'insurance:upserted',
+  INSURANCE_REMOVED:   'insurance:removed',
 };

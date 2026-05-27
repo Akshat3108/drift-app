@@ -80,6 +80,10 @@ function EditEMI({ route, navigation }) {
   const [emiOverride,      setEmiOverride]      = useState(
     editing?.emi_override != null ? String(editing.emi_override) : '',
   );
+  const [kind,             setKind]             = useState(editing?.kind || null);
+  // PS-12 — tri-state: null = follow implicit rule (home loan eligible),
+  // 1 = explicitly eligible, 0 = explicitly ineligible.
+  const [taxEligible,      setTaxEligible]      = useState(editing?.tax_eligible ?? null);
   const [notes,            setNotes]            = useState(editing?.notes || '');
   const [saving,           setSaving]           = useState(false);
 
@@ -152,6 +156,8 @@ function EditEMI({ route, navigation }) {
       notes: notes.trim() || null,
       icon,
       color,
+      kind,
+      tax_eligible: taxEligible,
     };
 
     setSaving(true);
@@ -298,6 +304,57 @@ function EditEMI({ route, navigation }) {
         }>
         <NumericInput F={F} value={emiOverride} onChange={setEmiOverride}
           placeholder={computedEMI > 0 ? String(computedEMI) : 'Optional'}/>
+      </Field>
+
+      {/* PS-12 — Kind + tax eligibility. Drives the TaxBenefit screen + FY export. */}
+      <Field F={F} label="LOAN KIND" sub="Home loans unlock 80C / 24B tax deductions">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {[
+            { key: null,           label: 'Unspecified' },
+            { key: 'home',         label: 'Home' },
+            { key: 'car',          label: 'Car' },
+            { key: 'personal',     label: 'Personal' },
+            { key: 'education',    label: 'Education' },
+            { key: 'other',        label: 'Other' },
+          ].map((opt) => {
+            const sel = opt.key === kind;
+            return (
+              <TouchableOpacity key={opt.label} onPress={() => setKind(opt.key)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityState={{ selected: sel }}
+                style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12,
+                  backgroundColor: sel ? F.coral : F.surface,
+                  borderWidth: 1, borderColor: sel ? F.coral : F.line }}>
+                <Text style={{ fontSize: 12, color: sel ? '#fff' : F.ink }}>{opt.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </Field>
+
+      <Field F={F} label="80C / 24B TAX BENEFIT"
+        sub={
+          taxEligible == null
+            ? (kind === 'home' ? 'Auto: eligible (home loan default)' : 'Auto: not eligible')
+            : (taxEligible ? 'Marked eligible' : 'Marked NOT eligible')
+        }>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {[
+            { key: null, label: 'Auto' },
+            { key: 1,    label: 'Eligible' },
+            { key: 0,    label: 'Not eligible' },
+          ].map((opt) => {
+            const sel = opt.key === taxEligible;
+            return (
+              <TouchableOpacity key={opt.label} onPress={() => setTaxEligible(opt.key)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityState={{ selected: sel }}
+                style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,
+                  backgroundColor: sel ? F.coral : F.surface,
+                  borderWidth: 1, borderColor: sel ? F.coral : F.line }}>
+                <Text style={{ fontSize: 12, color: sel ? '#fff' : F.ink }}>{opt.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </Field>
 
       <Field F={F} label="NOTES">

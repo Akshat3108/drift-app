@@ -1,11 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useExpenses } from '@features/expenses/context';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { ProgressBar } from '@components/primitives/ProgressBar';
-import { palette, potBg } from '../../../theme';
+import CategoryRow from '@features/trends/components/CategoryRow';
+import { palette } from '../../../theme';
+import { withProfiler } from '@core/utils/perf';
+import { MonthPicker, currentMonthKey, formatMonthLabel } from '@components/primitives/MonthPicker';
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -54,10 +57,13 @@ function anchorLabel(monthKey) {
 }
 
 function Trends({ navigation }) {
-  const { F, sym, pots, goals, totalSpend } = useApp();
+  const { F, sym, pots, goals, totalSpend,
+    activeMonth, setActiveMonth, resetActiveMonth } = useApp();
   const { monthlyTrend } = useExpenses();
   const insets = useSafeAreaInsets();
   const pal = palette(F);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const viewingHistory = activeMonth !== currentMonthKey();
 
   const [mode, setMode]                       = useState('current');
   const [trend, setTrend]                     = useState([]);
@@ -68,6 +74,14 @@ function Trends({ navigation }) {
   const modeMeta = MODES.find((m) => m.key === mode) ?? MODES[0];
   const today = useMemo(() => new Date().toISOString().slice(0, 7), []);
   const anchorMonth = modeMeta.shift !== 0 ? shiftMonthKey(today, modeMeta.shift) : null;
+
+  // 8.3 — stable per-row callback so CategoryRow's React.memo can short-
+  // circuit when its props haven't changed (the parent re-renders
+  // frequently as comparePots / mode / selectedMonth shift, but most rows'
+  // identity-stable props don't).
+  const onCategoryPress = useCallback((potId, emoji, label) => {
+    navigation.navigate('PotDetail', { potId, potName: `${emoji} ${label}` });
+  }, [navigation]);
 
   // 1) Bar-chart trend. Width depends on mode (6 for current/mom, 24 for yoy).
   useEffect(() => {
@@ -126,9 +140,37 @@ function Trends({ navigation }) {
       contentContainerStyle={{ paddingTop: insets.top + 16,
         paddingBottom: insets.bottom + 100, paddingHorizontal: 20 }}
     >
-      <Text style={{ fontSize: 26, color: F.ink, marginBottom: 16 }}>
+      <Text style={{ fontSize: 26, color: F.ink, marginBottom: 8 }}>
         Where it <Text style={{ color: F.coral, fontStyle: 'italic' }}>flowed</Text>
       </Text>
+
+      {/* PS-05 — month chip */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 8 }}>
+        <TouchableOpacity
+          onPress={() => setMonthPickerOpen(true)}
+          activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+            backgroundColor: viewingHistory ? F.surface : F.cream,
+            borderWidth: 1, borderColor: viewingHistory ? F.coral : F.line,
+            paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99 }}>
+          <Text style={{ fontSize: 13, color: viewingHistory ? F.coral : F.ink, fontWeight: '600' }}>
+            📅 {formatMonthLabel(activeMonth)}
+          </Text>
+          <Text style={{ fontSize: 11, color: F.ink3 }}>▾</Text>
+        </TouchableOpacity>
+        {viewingHistory && (
+          <TouchableOpacity onPress={resetActiveMonth} activeOpacity={0.7}>
+            <Text style={{ fontSize: 11, color: F.coral, textDecorationLine: 'underline' }}>Reset</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <MonthPicker
+        visible={monthPickerOpen}
+        onClose={() => setMonthPickerOpen(false)}
+        value={activeMonth}
+        onChange={setActiveMonth}
+        F={F}/>
 
       {/* 6.22 — comparison-mode pills. Hidden when no pots exist (the screen
           shows the legacy empty-state instead, so the toggle would be moot). */}
@@ -178,67 +220,23 @@ function Trends({ navigation }) {
             <Text style={{ fontSize: 13, color: F.ink3 }}>No categories yet</Text>
           </View>
         ) : pots.map((p, i) => {
-          const pct = p.budget > 0 ? p.spend / p.budget : 0;
-          const over = pct > 1;
           // 6.22 — per-pot Δ vs comparison anchor. Null when mode='current'
           // or when comparePots hasn't loaded yet or this pot didn't exist
           // in the anchor month.
           const prevSpent = comparePots.find((cp) => cp.id === p.id)?.spent;
           const deltaInfo = anchorMonth ? monthDelta(p.spend, prevSpent) : null;
           return (
-            <TouchableOpacity
+            <CategoryRow
               key={p.id}
-              onPress={() => navigation.navigate('PotDetail', { potId: p.id, potName: `${p.emoji} ${p.label}` })}
-              activeOpacity={0.7}
-              style={{ borderTopWidth: 1, borderTopColor: F.line, padding: 16 }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: pal[i % pal.length], flexShrink: 0 }}/>
-                <Text style={{ fontSize: 16 }}>{p.emoji}</Text>
-                <Text style={{ flex: 1, fontSize: 14, color: F.ink, fontWeight: '500' }}>{p.label}</Text>
-                <Text style={{ fontSize: 16, color: F.ink, fontWeight: '600' }}>{sym}{p.spend.toFixed(0)}</Text>
-                {over && (
-                  <View style={{ backgroundColor: '#fde2dc', borderRadius: 99,
-                    paddingHorizontal: 7, paddingVertical: 2 }}>
-                    {/* 2.D.19 — ⚠ glyph backs up the coral fill for colorblind users. */}
-                    <Text style={{ fontSize: 10, color: F.coral, fontWeight: '700' }}>⚠ over</Text>
-                  </View>
-                )}
-                <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
-              </View>
-              {p.budget > 0 && (
-                <>
-                  <ProgressBar value={p.spend} max={p.budget} color={over ? F.coral : pal[i % pal.length]} F={F} height={6}/>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                    <Text style={{ fontSize: 11, color: F.ink3 }}>
-                      {Math.round(pct * 100)}% of {sym}{p.budget} budget
-                    </Text>
-                    <Text style={{ fontSize: 11, color: over ? F.coral : F.sageD }}>
-                      {over
-                        ? `⚠ ${sym}${(p.spend - p.budget).toFixed(0)} over`
-                        : `✓ ${sym}${(p.budget - p.spend).toFixed(0)} left`}
-                    </Text>
-                  </View>
-                </>
-              )}
-              {/* 6.22 — per-pot delta line. Only renders in mom/yoy with a
-                  loaded anchor and a non-null delta. F.ink3 weight 500 so it
-                  reads as a subtle annotation, not a competing primary value. */}
-              {deltaInfo && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                  <Text style={{ fontSize: 11,
-                    color: deltaInfo.direction === 'up' ? F.coral
-                         : deltaInfo.direction === 'down' ? F.sageD : F.ink3,
-                    fontWeight: '600' }}>
-                    {deltaInfo.direction === 'up' ? '↑' : deltaInfo.direction === 'down' ? '↓' : '·'}
-                    {' '}{Math.abs(deltaInfo.pct).toFixed(0)}%
-                  </Text>
-                  <Text style={{ fontSize: 11, color: F.ink3 }}>
-                    vs {compareLabel} ({sym}{Number(prevSpent || 0).toFixed(0)})
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
+              pot={p}
+              F={F}
+              sym={sym}
+              palColor={pal[i % pal.length]}
+              deltaInfo={deltaInfo}
+              compareLabel={compareLabel}
+              prevSpent={prevSpent}
+              onPress={onCategoryPress}
+            />
           );
         })}
 
@@ -381,4 +379,4 @@ function Trends({ navigation }) {
   );
 }
 
-export default React.memo(Trends);
+export default React.memo(withProfiler('Trends', Trends));

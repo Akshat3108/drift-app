@@ -5,6 +5,8 @@ import {
   evaluateSubsDue,
   evaluatePriceAlerts,
   evaluatePantryLowStock,
+  evaluateHoldingsNavReminder,
+  evaluateInsuranceRenewals,
 } from './checkers';
 import {
   ensureForegroundHandler,
@@ -19,6 +21,8 @@ import { useExpenses } from '@features/expenses/context';
 import { useSubs } from '@features/subs/context';
 import { usePantry } from '@features/pantry/context';
 import { usePriceAlerts } from '@features/price_alerts/context';
+import { useInvestments } from '@features/investments/context';
+import { useInsurance } from '@features/insurance/context';
 import { priceAlertsRepo } from '@features/price_alerts/repo';
 import { useSettings } from '@features/profile/settings.context';
 import { useNotifyBusListener, NOTIFY_EVENTS } from '@core/state/NotifyBus';
@@ -63,6 +67,8 @@ export function NotificationsProvider({ children }) {
   const { subs } = useSubs();
   const { items: pantry } = usePantry();
   const { alerts: priceAlerts } = usePriceAlerts();
+  const { holdings } = useInvestments();
+  const { policies: insurancePolicies } = useInsurance();
   const { settings, sym } = useSettings();
 
   const [unreadCount, setUnreadCount] = useState(0);
@@ -77,12 +83,16 @@ export function NotificationsProvider({ children }) {
   const subsRef = useRef(subs);
   const pantryRef = useRef(pantry);
   const priceAlertsRef = useRef(priceAlerts);
+  const holdingsRef = useRef(holdings);
+  const insuranceRef = useRef(insurancePolicies);
   const settingsRef = useRef(settings);
   const symRef = useRef(sym);
   useEffect(() => { potsRef.current = pots; }, [pots]);
   useEffect(() => { subsRef.current = subs; }, [subs]);
   useEffect(() => { pantryRef.current = pantry; }, [pantry]);
   useEffect(() => { priceAlertsRef.current = priceAlerts; }, [priceAlerts]);
+  useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
+  useEffect(() => { insuranceRef.current = insurancePolicies; }, [insurancePolicies]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { symRef.current = sym; }, [sym]);
 
@@ -96,6 +106,59 @@ export function NotificationsProvider({ children }) {
       pots: potsRef.current,
       settings: settingsRef.current,
       sym: symRef.current,
+    });
+    if (plan.length) {
+      await applyPlan(plan);
+      await refreshUnread();
+    }
+  }, [refreshUnread]);
+
+  // PS-11 — Insurance renewal evaluator. Schedules one notification per
+  // policy with a non-null `next_due`, set lead_days before the date at
+  // 09:00 local. Re-runs on boot AND on every policy mutation via the
+  // INSURANCE_CHANGED bus event below.
+  const rescheduleAllInsurance = useCallback(async () => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    const plan = evaluateInsuranceRenewals({
+      policies: insuranceRef.current,
+      settings: settingsRef.current,
+      sym: symRef.current,
+    });
+    if (plan.length) {
+      await applyPlan(plan);
+      await refreshUnread();
+    }
+  }, [refreshUnread]);
+
+  const reschedulePolicy = useCallback(async (policy) => {
+    if (!policy) return;
+    await cancelByIdentifier(`insurance:${policy.id}`);
+    if (!settingsRef.current?.notifications_enabled) return;
+    const plan = evaluateInsuranceRenewals({
+      policies: [policy],
+      settings: settingsRef.current,
+      sym: symRef.current,
+    });
+    if (plan.length) {
+      await applyPlan(plan);
+      await refreshUnread();
+    }
+  }, [refreshUnread]);
+
+  const cancelPolicySchedule = useCallback(async (policyId) => {
+    if (policyId == null) return;
+    await cancelByIdentifier(`insurance:${policyId}`);
+  }, []);
+
+  // PS-10 — Holdings NAV-update reminder. Fires from boot only (monthly
+  // dedupe gate keeps it idempotent). No event hooks — holdings rarely
+  // change, and the boot pass after the first of the month is the
+  // appropriate fire point.
+  const evaluateHoldings = useCallback(async () => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    const plan = evaluateHoldingsNavReminder({
+      holdings: holdingsRef.current,
+      settings: settingsRef.current,
     });
     if (plan.length) {
       await applyPlan(plan);
@@ -217,6 +280,8 @@ export function NotificationsProvider({ children }) {
           evaluateBudgets(),
           rescheduleAllSubs(),
           evaluatePantry(),
+          evaluateHoldings(),
+          rescheduleAllInsurance(),
         ]);
       }
       if (!cancelled) setReady(true);
@@ -233,10 +298,10 @@ export function NotificationsProvider({ children }) {
   useEffect(() => {
     const now = settings?.notifications_enabled ? 1 : 0;
     if (now && !prevEnabled.current) {
-      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry()]).catch(() => {});
+      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance()]).catch(() => {});
     }
     prevEnabled.current = now;
-  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry]);
+  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance]);
 
   // NotifyBus listeners — wired here, fired from ExpensesProvider /
   // SubsProvider after their own state has settled.
@@ -267,6 +332,14 @@ export function NotificationsProvider({ children }) {
   useNotifyBusListener(NOTIFY_EVENTS.SUB_REMOVED, useCallback((payload) => {
     cancelSubSchedule(payload?.id);
   }, [cancelSubSchedule]));
+
+  // PS-11 — Insurance lifecycle hooks.
+  useNotifyBusListener(NOTIFY_EVENTS.INSURANCE_UPSERTED, useCallback((policy) => {
+    reschedulePolicy(policy);
+  }, [reschedulePolicy]));
+  useNotifyBusListener(NOTIFY_EVENTS.INSURANCE_REMOVED, useCallback((payload) => {
+    cancelPolicySchedule(payload?.id);
+  }, [cancelPolicySchedule]));
 
   const toggleEnabled = useCallback(async (next, setSetting) => {
     if (next) {

@@ -210,6 +210,69 @@ function fmtPantryQty(n, unit) {
   return `${s} ${unit || ''}`.trim();
 }
 
+// PS-11 — Insurance renewal reminder.
+//
+// One scheduled notification per live policy with a non-null `next_due`,
+// fired at 09:00 local on (next_due - lead_days). Dedupe key embeds the
+// due date so renewing a policy (which advances next_due) re-arms a fresh
+// notification. Lead days reuses `notif_sub_lead_days` (the same setting
+// that drives subscription reminders) — both are "upcoming bill" reminders
+// so a single user-tunable lead value makes sense.
+export function evaluateInsuranceRenewals({ policies, settings, now = new Date(), sym = '₹' }) {
+  if (!settings?.notifications_enabled) return [];
+  const leadDays = Number(settings?.notif_sub_lead_days);
+  if (!Number.isFinite(leadDays) || leadDays <= 0) return [];
+  const out = [];
+  for (const pol of (policies || [])) {
+    if (pol.deleted_at) continue;
+    if (!pol.next_due) continue;
+    const trigger = atLocal0900(pol.next_due, leadDays);
+    if (!trigger || trigger.getTime() <= now.getTime()) continue;
+    const dedupe_key = `insurance:${pol.id}:${pol.next_due}`;
+    const leadLabel = leadDays === 1 ? 'tomorrow' : `in ${leadDays} days`;
+    out.push({
+      dedupe_key,
+      kind: 'insurance_renewal',
+      title: `${pol.label} renews ${leadLabel}`,
+      body: `${fmtAmount(pol.premium_amount, sym)} due ${pol.next_due}.`,
+      payload: { policy_id: pol.id, next_due: pol.next_due, lead_days: leadDays },
+      schedule: { type: 'at', date: trigger, identifier: `insurance:${pol.id}` },
+    });
+  }
+  return out;
+}
+
+// PS-10 — Holdings NAV-update reminder.
+//
+// Fires once per (calendar month) when at least one live holding's
+// `last_updated` is older than 25 days. A single notification covers the
+// entire portfolio (not per-holding) so the user doesn't get spammed with
+// one fire per fund. Dedupe key embeds YYYY-MM so next month re-arms.
+//
+// `holdings` is the array of decorated rows from useInvestments().holdings.
+export function evaluateHoldingsNavReminder({ holdings, settings, now = new Date() }) {
+  if (!settings?.notifications_enabled) return [];
+  const live = (holdings || []).filter(h => !h.deleted_at);
+  if (live.length === 0) return [];
+  const cutoff = now.getTime() - 25 * 24 * 60 * 60 * 1000;
+  let stale = 0;
+  for (const h of live) {
+    if (!h.last_updated) { stale += 1; continue; }
+    const t = Date.parse(h.last_updated);
+    if (!Number.isFinite(t) || t < cutoff) stale += 1;
+  }
+  if (stale === 0) return [];
+  const monthKey = currentMonthKey(now);
+  return [{
+    dedupe_key: `holdings:nav:${monthKey}`,
+    kind: 'holdings_nav_stale',
+    title: stale === 1 ? '1 holding needs a NAV refresh' : `${stale} holdings need NAV refresh`,
+    body: `Tap to update market values so your net worth stays accurate.`,
+    payload: { stale_count: stale, month_key: monthKey },
+    schedule: { type: 'now' },
+  }];
+}
+
 // 7.7 — Pantry low-stock checker.
 //
 // Fires once per (item, ISO week) when a live pantry row's current_qty is at

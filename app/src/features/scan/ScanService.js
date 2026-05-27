@@ -1,3 +1,4 @@
+import { InteractionManager } from 'react-native';
 import { recognize, extractLines } from '@ocr/textRecognition';
 import { parseReceipt, recalcItem } from '@ocr/parseReceipt';
 import { lightPreprocess } from '@ocr/preprocess';
@@ -12,6 +13,26 @@ import { mergePages } from '@ocr/stitchPages';
 // into @ocr/parseReceipt directly. Keeps the service the single import the
 // Scan UI needs.
 export { recalcItem };
+
+// 8.5 — Thrown by `signal.throwIfCancelled()` when Scan.js has bumped its
+// scanRequestRef past the value snapshotted at scan start (i.e. the user
+// re-tapped Scan, hit Reset, or unmounted). ScanService is the right home
+// for this — parseReceipt stays free of any cancellation type and just
+// propagates whatever the signal throws.
+export class CancelledError extends Error {
+  constructor(message = 'scan cancelled') {
+    super(message);
+    this.name = 'CancelledError';
+    this.cancelled = true;
+  }
+}
+
+// 8.5 — Yield primitive injected into parseReceipt between stages. Waits
+// for any in-flight touch / animation to settle before resuming the next
+// stage, so the UI can paint mid-parse without competing with the parser
+// for the JS thread.
+const yieldToUI = () =>
+  new Promise(resolve => InteractionManager.runAfterInteractions(() => resolve()));
 
 // Maps detected receipt format → regex picking the best-fit category by name.
 // Produce-heavy carts override to grocery regardless of format.
@@ -72,8 +93,9 @@ export function buildReviewPayload(parsed, pots) {
 
 // Back-compat wrapper. Callers (tests, debug consoles, future batch
 // importers) that pass a raw ML Kit OCR result keep working unchanged.
-export function processReceipt(ocr, pots) {
-  return buildReviewPayload(parseReceipt(ocr), pots);
+// 8.5 — now async because parseReceipt yields between stages.
+export async function processReceipt(ocr, pots) {
+  return buildReviewPayload(await parseReceipt(ocr), pots);
 }
 
 // Re-export the fingerprint helpers so Scan.js can recompute after the user
@@ -99,13 +121,16 @@ export { fingerprintReceipt, softFingerprint };
 // to the 4.19 golden-candidate capture pipeline on save. It's not part of
 // the review-payload contract (callers should ignore it unless they're the
 // capture path).
-export async function scanAndProcess(uri, pots) {
+export async function scanAndProcess(uri, pots, { signal } = {}) {
+  const parseOpts = { yieldFn: yieldToUI, signal };
   const preprocessed = await lightPreprocess(uri);
+  signal?.throwIfCancelled?.();
   const mlkitOcr = await recognize(preprocessed);
+  signal?.throwIfCancelled?.();
   const mlkitLines = extractLines(mlkitOcr);
 
   // ── Probe parse ───────────────────────────────────────────────────────
-  let parsed = parseReceipt(mlkitLines);
+  let parsed = await parseReceipt(mlkitLines, parseOpts);
   let engine = 'mlkit';
   let templateApplied = false;
 
@@ -131,7 +156,7 @@ export async function scanAndProcess(uri, pots) {
     : null;
 
   if (tplWithColumns) {
-    const templated = parseReceipt(mlkitLines, { template: tplWithColumns });
+    const templated = await parseReceipt(mlkitLines, { ...parseOpts, template: tplWithColumns });
     const prior = parsed.confidence?.overall ?? 0;
     const after = templated.confidence?.overall ?? 0;
     if (after >= prior) {
@@ -143,10 +168,13 @@ export async function scanAndProcess(uri, pots) {
   // ── 4.21 — Tesseract fallback (now template-aware) ────────────────────
   if (shouldFallback(parsed, mlkitLines)) {
     const tess = await TesseractEngine.recognize(preprocessed);
+    signal?.throwIfCancelled?.();
     if (tess.available && tess.lines.length > 0) {
       const merged = mergeEngineResults(mlkitLines, tess.lines);
-      const opts = tplWithColumns ? { template: tplWithColumns } : {};
-      const reparsed = parseReceipt(merged, opts);
+      const opts = tplWithColumns
+        ? { ...parseOpts, template: tplWithColumns }
+        : parseOpts;
+      const reparsed = await parseReceipt(merged, opts);
       const prior = parsed.confidence?.overall ?? 0;
       const after = reparsed.confidence?.overall ?? 0;
       if (after >= prior) {
@@ -192,8 +220,9 @@ export async function scanAndProcess(uri, pots) {
 // Order matters: pages must be passed in capture order. The merge rule
 // for total is "last page wins if > 0" — the last page in `priorPages +
 // newPage` is the latest scan, so that's the natural ordering.
-export async function scanAndProcessMore(uri, priorPages, pots) {
-  const newPageProcessed = await scanAndProcess(uri, pots);
+export async function scanAndProcessMore(uri, priorPages, pots, { signal } = {}) {
+  const newPageProcessed = await scanAndProcess(uri, pots, { signal });
+  signal?.throwIfCancelled?.();
   const newParsed = newPageProcessed._parsed;
   const updatedPages = [...(priorPages || []), newParsed];
   const merged = mergePages(updatedPages);

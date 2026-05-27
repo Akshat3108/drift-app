@@ -58,7 +58,7 @@ function ReportRow({ icon, title, sub, F, onPress }) {
 }
 
 function Hub({ navigation }) {
-  const { F, sym } = useApp();
+  const { F, sym, settings } = useApp();
   const insets = useSafeAreaInsets();
 
   const [velocity, setVelocity]   = useState(null);
@@ -203,6 +203,17 @@ function Hub({ navigation }) {
         <ReportRow icon="🎯" title="End-of-month forecast"
           sub="3-model ensemble + confidence cone"
           F={F} onPress={() => navigation.navigate('Forecast')}/>
+        <ReportRow icon="🌊" title="Money flow"
+          sub="Income → category Sankey for this month"
+          F={F} onPress={() => navigation.navigate('MoneyFlow')}/>
+        <ReportRow icon="🎭" title="Mood × spend"
+          sub="How feelings shape your spending"
+          F={F} onPress={() => navigation.navigate('MoodSpend')}/>
+        {settings?.carbon_tracking ? (
+          <ReportRow icon="🌱" title="Carbon footprint"
+            sub="Monthly CO₂ + top emitters"
+            F={F} onPress={() => navigation.navigate('CarbonDashboard')}/>
+        ) : null}
         <ReportRow icon="📅" title="Spending calendar"
           sub="Month-of-year + weekday + day-of-month"
           F={F} onPress={() => navigation.navigate('Calendar')}/>

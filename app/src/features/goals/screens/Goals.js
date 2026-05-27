@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { ProgressBar } from '@components/primitives/ProgressBar';
+import GoalRow from '@features/goals/components/GoalRow';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
 
@@ -19,7 +20,11 @@ function Goals({ navigation }) {
   const colors = [F.coral, F.sageD, F.sky2, '#9d8fc8'];
   const bgs    = [F.cream, F.mint, F.sky, F.lilac];
 
-  const handleLongPress = (g) => {
+  // 8.3 — long-press menu. Receives the id; we re-resolve the goal object
+  // by id so the menu copy / restore semantics stay correct.
+  const handleLongPress = useCallback((id) => {
+    const g = goals.find((x) => x.id === id);
+    if (!g) return;
     Alert.alert(g.name, null, [
       { text: 'Edit', onPress: () => navigation.navigate('EditGoal', { id: g.id }) },
       { text: 'Contribute', onPress: () => { setContribFor(g); setContribAmt(''); } },
@@ -43,7 +48,14 @@ function Goals({ navigation }) {
       } },
       { text: 'Close', style: 'cancel' },
     ]);
-  };
+  }, [goals, navigation, removeGoal, restoreGoal, toast]);
+
+  const handleRowPress = useCallback((id) => {
+    const g = goals.find((x) => x.id === id);
+    if (!g) return;
+    setContribFor(g);
+    setContribAmt('');
+  }, [goals]);
 
   const doContribute = async () => {
     const amt = parseFloat(contribAmt);
@@ -88,51 +100,18 @@ function Goals({ navigation }) {
           </View>
         )}
 
-        {goals.map((g, i) => {
-          const pct = g.target_amount > 0 ? g.saved_amount / g.target_amount : 0;
-          return (
-            <TouchableOpacity
-              key={g.id}
-              onPress={() => { setContribFor(g); setContribAmt(''); }}
-              onLongPress={() => handleLongPress(g)}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`${g.name}: ${Math.round(pct * 100)} percent saved, ${sym}${g.saved_amount.toLocaleString()} of ${sym}${g.target_amount.toLocaleString()}. Double tap to contribute, long-press for more.`}
-              style={{ backgroundColor: bgs[i % 4], borderRadius: 22, padding: 18, marginBottom: 12 }}
-            >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between',
-                alignItems: 'flex-start', marginBottom: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: F.surface,
-                    alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: 24 }}>{g.emoji}</Text>
-                  </View>
-                  <View>
-                    <Text style={{ fontSize: 18, color: F.ink }}>{g.name}</Text>
-                    {g.eta && <Text style={{ fontSize: 12, color: F.ink3 }}>ETA: {g.eta}</Text>}
-                  </View>
-                </View>
-                <Text style={{ fontSize: 26, color: colors[i % 4], fontWeight: '400' }}>
-                  {Math.round(pct*100)}%
-                </Text>
-              </View>
-              <ProgressBar value={g.saved_amount} max={g.target_amount} color={colors[i % 4]} F={F} height={8}/>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                <Text style={{ fontSize: 13, color: F.ink2 }}>
-                  <Text style={{ color: F.ink, fontWeight: '600' }}>
-                    {sym}{g.saved_amount.toLocaleString()}
-                  </Text> saved
-                </Text>
-                <Text style={{ fontSize: 13, color: F.ink3 }}>
-                  {sym}{Math.max(0, g.target_amount - g.saved_amount).toLocaleString()} to go
-                </Text>
-              </View>
-              <Text style={{ fontSize: 11, color: F.ink3, marginTop: 6, textAlign: 'center' }}>
-                tap to contribute · long-press for more
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        {goals.map((g, i) => (
+          <GoalRow
+            key={g.id}
+            goal={g}
+            F={F}
+            sym={sym}
+            bg={bgs[i % 4]}
+            color={colors[i % 4]}
+            onPress={handleRowPress}
+            onLongPress={handleLongPress}
+          />
+        ))}
       </ScrollView>
 
       <TouchableOpacity

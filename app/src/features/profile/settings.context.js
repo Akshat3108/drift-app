@@ -13,6 +13,10 @@ const DEFAULTS = {
   notifications_enabled: 0,
   notif_budget_threshold: 0.8,
   notif_sub_lead_days: 3,
+  app_lock_enabled: 0,
+  privacy_block_screenshots: 0,
+  privacy_hide_on_minimize: 0,
+  privacy_mask_amounts_always: 0,
 };
 
 export function SettingsProvider({ children }) {

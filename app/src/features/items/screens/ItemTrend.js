@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useItemActions } from '@features/items/context';
 import { usePriceAlerts } from '@features/price_alerts/context';
-import { cheapestMerchantPerItem } from '../../../analytics';
+import { cheapestMerchantPerItem, pricePrediction } from '../../../analytics';
+import ItemHistoryRow from '@features/items/components/ItemHistoryRow';
 
 function ItemTrend({ route, navigation }) {
   const { F, sym } = useApp();
@@ -21,9 +22,8 @@ function ItemTrend({ route, navigation }) {
   const [consumption, setConsumption] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [sameQty, setSameQty] = useState([]);
-  // 6.14 — cheapest-merchant data for this item. null until first load,
-  // [] when no merchants have ≥2 samples (the "Cheapest" pill stays hidden).
   const [cheapest, setCheapest] = useState(null);
+  const [prediction, setPrediction] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -45,8 +45,6 @@ function ItemTrend({ route, navigation }) {
     consumptionQuery(normalizedName, { bucket, range: 12 }).then(setConsumption);
   }, [normalizedName, bucket, consumptionQuery]);
 
-  // 6.14 — load cheapest-merchant comparison once per item. Filtered server-
-  // side by normalizedName so we don't bring back the full top-50 dataset.
   useEffect(() => {
     let cancelled = false;
     cheapestMerchantPerItem({ normalizedName, limitItems: 1, topN: 5 })
@@ -56,6 +54,14 @@ function ItemTrend({ route, navigation }) {
         setCheapest(item?.merchants ?? []);
       })
       .catch(() => { if (!cancelled) setCheapest([]); });
+    return () => { cancelled = true; };
+  }, [normalizedName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    pricePrediction(normalizedName)
+      .then((res) => { if (!cancelled) setPrediction(res); })
+      .catch(() => { if (!cancelled) setPrediction(null); });
     return () => { cancelled = true; };
   }, [normalizedName]);
 
@@ -73,10 +79,29 @@ function ItemTrend({ route, navigation }) {
   const consTotal = consumption.reduce((s, c) => s + c.qty_canonical, 0);
   const canonicalUnit = stats?.canonical_unit || last?.canonical_unit || 'pcs';
 
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: F.bg }}
-      contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}>
+  // 8.2 — newest-first ordering. Pre-reversed once instead of per-render
+  // inside renderItem.
+  const historyDesc = useMemo(() => history.slice().reverse(), [history]);
 
+  const onHistoryRowPress = useCallback((expense_id) => {
+    navigation.navigate('Detail', { id: expense_id });
+  }, [navigation]);
+
+  const renderHistoryItem = useCallback(({ item, index }) => (
+    <ItemHistoryRow
+      entry={item}
+      F={F}
+      sym={sym}
+      isFirst={index === 0}
+      isLast={index === historyDesc.length - 1}
+      onPress={onHistoryRowPress}
+    />
+  ), [F, sym, historyDesc.length, onHistoryRowPress]);
+
+  const keyExtractor = useCallback((item) => String(item.id), []);
+
+  const ListHeader = useMemo(() => (
+    <>
       <View style={{ backgroundColor: F.cream, borderRadius: 24, padding: 22, marginBottom: 16 }}>
         <Text style={{ fontSize: 28, color: F.ink, fontWeight: '400', textTransform: 'capitalize' }}>
           {displayName}
@@ -103,8 +128,6 @@ function ItemTrend({ route, navigation }) {
         )}
       </View>
 
-      {/* 7.8 — Watch price chip. Tap → EditPriceAlert. When watching, chip is
-          coral-filled and labels the existing threshold; otherwise outlined. */}
       <TouchableOpacity
         onPress={() => navigation.navigate('EditPriceAlert', watching
           ? { id: watching.id }
@@ -132,9 +155,6 @@ function ItemTrend({ route, navigation }) {
       </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-        {/* 6.14 — the Cheapest pill is only included when ≥1 merchant has
-            ≥2 samples for this item (cheapestMerchantPerItem's HAVING gate).
-            Single-sample merchants are OCR noise, not real comparisons. */}
         {[
           ['price', 'Price', true],
           ['consumption', 'Consumption', true],
@@ -224,6 +244,34 @@ function ItemTrend({ route, navigation }) {
                   <Text style={{ fontSize: 10, color: F.ink3 }}>per {canonicalUnit}</Text>
                 </View>
               ))}
+            </View>
+          )}
+
+          {prediction?.ready && (
+            <View style={{ backgroundColor: F.surface, borderRadius: 14,
+              borderWidth: 1, borderColor: F.line, padding: 14, marginBottom: 16,
+              flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 20,
+                backgroundColor: F.cream, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 18 }}>
+                  {prediction.slope_per_day > 0 ? '📈' : '📉'}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, color: F.ink3, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                  Projected next price
+                </Text>
+                <Text style={{ fontSize: 18, color: prediction.slope_per_day > 0 ? F.coral : F.sageD,
+                  fontWeight: '600', marginTop: 2 }}>
+                  {sym}{prediction.predicted_next_price.toFixed(2)}
+                  <Text style={{ fontSize: 12, color: F.ink3, fontWeight: '400' }}>
+                    {' '}±{sym}{prediction.residual_stddev.toFixed(2)}/{canonicalUnit}
+                  </Text>
+                </Text>
+                <Text style={{ fontSize: 11, color: F.ink3, marginTop: 2 }}>
+                  Linear trend over {prediction.months_observed} months · around {prediction.predicted_next_date}
+                </Text>
+              </View>
             </View>
           )}
         </>
@@ -396,39 +444,31 @@ function ItemTrend({ route, navigation }) {
       )}
 
       {history.length > 0 && (
-        <View>
-          <Text style={{ fontSize: 15, color: F.ink, marginBottom: 8, fontWeight: '500' }}>History</Text>
-          <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1, borderColor: F.line, overflow: 'hidden' }}>
-            {history.slice().reverse().map((h, i) => (
-              <TouchableOpacity
-                key={h.id}
-                onPress={() => navigation.navigate('Detail', { id: h.expense_id })}
-                activeOpacity={0.7}
-                style={{ padding: 14, borderTopWidth: i ? 1 : 0, borderTopColor: F.line,
-                  flexDirection: 'row', alignItems: 'center', gap: 10 }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, color: F.ink, fontWeight: '500' }}>
-                    {h.merchant || 'Unknown store'}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: F.ink3 }}>
-                    {h.purchase_date} · {h.qty} {h.unit}
-                  </Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={{ fontSize: 14, color: F.ink, fontWeight: '500' }}>
-                    {sym}{h.price.toFixed(2)}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: F.coral }}>
-                    {sym}{h.unit_price.toFixed(2)}/{h.canonical_unit}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+        <Text style={{ fontSize: 15, color: F.ink, marginBottom: 8, fontWeight: '500' }}>History</Text>
       )}
-    </ScrollView>
+    </>
+  ), [
+    F, sym, displayName, last, changeAll, canonicalUnit,
+    watching, normalizedName, navigation,
+    cheapest, tab,
+    selectedIdx, history, maxPrice, minPrice, stats, prediction,
+    bucket, consumption, consMax, consTotal,
+    sameQty,
+  ]);
+
+  return (
+    <FlatList
+      style={{ flex: 1, backgroundColor: F.bg }}
+      data={historyDesc}
+      keyExtractor={keyExtractor}
+      renderItem={renderHistoryItem}
+      ListHeaderComponent={ListHeader}
+      contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
+      removeClippedSubviews
+      initialNumToRender={15}
+      maxToRenderPerBatch={15}
+      windowSize={11}
+    />
   );
 }
 

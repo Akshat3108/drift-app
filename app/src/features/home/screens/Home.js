@@ -8,9 +8,18 @@ import { logError } from '@core/utils/log';
 import { formatShort, shorten, daysUntilLabel } from '@core/utils/format';
 import { useHomeDashboard } from '../useHomeDashboard';
 import ExpectedThisMonth from '../components/ExpectedThisMonth';
+import { withProfiler } from '@core/utils/perf';
+import { MonthPicker, currentMonthKey, formatMonthLabel } from '@components/primitives/MonthPicker';
+import { useNotifications } from '@features/notifications/context';
 
 function Home({ navigation }) {
-  const { F, sym, profile, pots, expenses, totalSpend, totalIncome, monthBudget, refresh } = useApp();
+  const { F, sym, profile, pots, expenses, totalSpend, totalIncome, monthBudget, refresh,
+    activeMonth, setActiveMonth, resetActiveMonth } = useApp();
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const liveCurrentMonth = currentMonthKey();
+  const viewingHistory = activeMonth !== liveCurrentMonth;
+  const notif = useNotifications();
+  const unreadCount = notif?.unreadCount || 0;
   const { net, nextTrip, streak, topMover, refresh: refreshDashboard } = useHomeDashboard();
   const insets = useSafeAreaInsets();
   const left = Math.max(0, monthBudget - totalSpend);
@@ -64,7 +73,7 @@ function Home({ navigation }) {
       }
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between',
-        alignItems: 'center', marginBottom: 20 }}>
+        alignItems: 'center', marginBottom: 12 }}>
         <View>
           <Text style={{ fontSize: 13, color: F.ink2 }}>Hello,</Text>
           <Text style={{ fontSize: 28, color: F.ink, fontWeight: '400' }}>
@@ -83,6 +92,28 @@ function Home({ navigation }) {
           >
             <Text style={{ fontSize: 18 }}>🔍</Text>
           </TouchableOpacity>
+          {/* PS-08 — Activity bell with unread badge. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Activity')}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={unreadCount > 0 ? `Activity, ${unreadCount} unread` : 'Activity'}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: F.cream,
+              alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: F.line }}
+          >
+            <Text style={{ fontSize: 18 }}>🔔</Text>
+            {unreadCount > 0 && (
+              <View style={{ position: 'absolute', top: -2, right: -2,
+                minWidth: 18, height: 18, borderRadius: 9,
+                backgroundColor: F.coral, paddingHorizontal: 4,
+                alignItems: 'center', justifyContent: 'center',
+                borderWidth: 2, borderColor: F.bg }}>
+                <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate('Profile')}
             activeOpacity={0.7}
@@ -96,7 +127,53 @@ function Home({ navigation }) {
         </View>
       </View>
 
+      {/* PS-05 — month chip + viewing-history banner */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 8 }}>
+        <TouchableOpacity
+          onPress={() => setMonthPickerOpen(true)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Pick month"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+            backgroundColor: viewingHistory ? F.surface : F.cream,
+            borderWidth: 1, borderColor: viewingHistory ? F.coral : F.line,
+            paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99 }}>
+          <Text style={{ fontSize: 13, color: viewingHistory ? F.coral : F.ink, fontWeight: '600' }}>
+            📅 {formatMonthLabel(activeMonth)}
+          </Text>
+          <Text style={{ fontSize: 11, color: F.ink3 }}>▾</Text>
+        </TouchableOpacity>
+        {viewingHistory && (
+          <TouchableOpacity onPress={resetActiveMonth} activeOpacity={0.7}>
+            <Text style={{ fontSize: 11, color: F.coral, textDecorationLine: 'underline' }}>
+              Reset
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <MonthPicker
+        visible={monthPickerOpen}
+        onClose={() => setMonthPickerOpen(false)}
+        value={activeMonth}
+        onChange={setActiveMonth}
+        F={F}/>
+
       <View style={{ backgroundColor: F.cream, borderRadius: 24, padding: 22, marginBottom: 20 }}>
+        {/* PS-06 — Edit-budget chevron pill in the top-right of the hero. */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('BudgetSetup')}
+          activeOpacity={0.7}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Open budget setup"
+          style={{ position: 'absolute', top: 14, right: 14,
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99,
+            backgroundColor: F.surface, borderWidth: 1, borderColor: F.line }}>
+          <Text style={{ fontSize: 11, color: F.ink2, fontWeight: '600' }}>🎯 Budget</Text>
+          <Text style={{ fontSize: 11, color: F.ink3 }}>›</Text>
+        </TouchableOpacity>
         <Text style={{ fontSize: 11, color: F.ink2 }}>
           {monthBudget > 0 ? 'You have' : 'Spent this month'}
         </Text>
@@ -390,4 +467,4 @@ function Home({ navigation }) {
 }
 
 
-export default React.memo(Home);
+export default React.memo(withProfiler('Home', Home));

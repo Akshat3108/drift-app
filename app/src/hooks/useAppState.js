@@ -3,7 +3,9 @@ import { resetAll } from '../db';
 import { ThemeProvider, useTheme } from '@core/theme/ThemeContext';
 import { RefreshBusProvider, useRefreshBus } from '@core/state/RefreshBus';
 import { NotifyBusProvider } from '@core/state/NotifyBus';
+import { queryCache } from '@core/state/useQuery';
 import { SettingsProvider, useSettings } from '@features/profile/settings.context';
+import { PrivacyProvider } from '@core/state/PrivacyContext';
 import { ProfileProvider,  useProfile  } from '@features/profile/context';
 import { ExpensesProvider, useExpenses } from '@features/expenses/context';
 import { IncomeProvider, useIncome } from '@features/income/context';
@@ -19,15 +21,25 @@ import { PeopleProvider, usePeople } from '@features/splits/context';
 import { UtilitiesProvider, useUtilities } from '@features/utilities/context';
 import { GoalsProvider, useGoals } from '@features/goals/context';
 import { AccountsProvider, useAccounts } from '@features/accounts/context';
+import { InvestmentsProvider, useInvestments } from '@features/investments/context';
+import { InsuranceProvider, useInsurance } from '@features/insurance/context';
+import { FastagProvider, useFastag } from '@features/fastag/context';
 import { TravelProvider, useTravel } from '@features/travel/context';
 import { NotificationsProvider, useNotifications } from '@features/notifications/context';
 
 // ── ThemeProvider needs to read dark_mode from SettingsContext, so it sits
 //    inside SettingsProvider but outside everything else. Tiny shim component
 //    bridges the two without exposing settings to ThemeProvider's prop.
+//    PS-21 — PrivacyProvider also reads settings (mask flags) so it lives
+//    here, just inside SettingsProvider, before ThemeProvider so theme
+//    consumers can also read privacy state if needed.
 function ThemedChildren({ children }) {
   const { settings } = useSettings();
-  return <ThemeProvider dark={!!settings.dark_mode}>{children}</ThemeProvider>;
+  return (
+    <ThemeProvider dark={!!settings.dark_mode}>
+      <PrivacyProvider>{children}</PrivacyProvider>
+    </ThemeProvider>
+  );
 }
 
 // ── Gates render until every feature provider reports ready. Mirrors the
@@ -44,6 +56,9 @@ function ReadyGate({ children }) {
     useSubs().ready,
     useGoals().ready,
     useAccounts().ready,
+    useInvestments().ready,
+    useInsurance().ready,
+    useFastag().ready,
     useTravel().ready,
     useNotifications().ready,
     useTags().ready,
@@ -87,11 +102,17 @@ export function AppRoot({ children }) {
                       <UtilitiesProvider>
                       <GoalsProvider>
                         <AccountsProvider>
-                          <TravelProvider>
-                            <NotificationsProvider>
-                              <ReadyGate>{children}</ReadyGate>
-                            </NotificationsProvider>
-                          </TravelProvider>
+                          <InvestmentsProvider>
+                            <InsuranceProvider>
+                              <FastagProvider>
+                                <TravelProvider>
+                                  <NotificationsProvider>
+                                    <ReadyGate>{children}</ReadyGate>
+                                  </NotificationsProvider>
+                                </TravelProvider>
+                              </FastagProvider>
+                            </InsuranceProvider>
+                          </InvestmentsProvider>
                         </AccountsProvider>
                       </GoalsProvider>
                       </UtilitiesProvider>
@@ -129,6 +150,7 @@ export function useApp() {
   const { profile, onboarded, createProfile, updateProfile } = useProfile();
   const { categories, addCategory, updateCategory, removeCategory, restoreCategory } = useCategories();
   const { expenses, pots, totalSpend, monthBudget,
+          activeMonth, setActiveMonth, resetActiveMonth,
           addExpense, updateExpense, removeExpense, restoreExpense,
           addExpenseWithItems, updateExpenseWithItems } = useExpenses();
   const { income, totalIncome, addIncome, updateIncome, removeIncome } = useIncome();
@@ -140,6 +162,7 @@ export function useApp() {
 
   const resetApp = useCallback(async () => {
     await resetAll();
+    queryCache.clearForReset();
     await bus.refreshAll();
   }, [bus]);
 
@@ -153,6 +176,7 @@ export function useApp() {
     categories,
     pots, expenses, income, subs, goals, accounts, trips,
     totalSpend, monthBudget, totalIncome,
+    activeMonth, setActiveMonth, resetActiveMonth,
     F, sym,
     createProfile, updateProfile,
     setSetting,
@@ -170,6 +194,7 @@ export function useApp() {
     categories, addCategory, updateCategory, removeCategory, restoreCategory,
     expenses, pots, totalSpend, monthBudget,
     income, totalIncome,
+    activeMonth, setActiveMonth, resetActiveMonth,
     addExpense, updateExpense, removeExpense, restoreExpense, addExpenseWithItems, updateExpenseWithItems,
     addIncome, updateIncome, removeIncome,
     subs, addSub, updateSub, cancelSub, reinstateSub, removeSub, restoreSub,

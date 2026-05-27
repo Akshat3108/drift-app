@@ -5,6 +5,36 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme } from '../core/theme/ThemeContext';
 import CustomTabBar from './CustomTabBar';
 
+// PS-15 — Deep-link config. Static launcher shortcuts dispatch
+//   drift://add    → Tabs > Home, then push Add as a modal
+//   drift://scan   → Tabs > Capture
+//   drift://search → Tabs > Home, then push Search as a modal
+// The `Tabs.screens` shape is required by the bottom-tab navigator
+// inside the linking config so React Navigation knows the route lives
+// nested inside Tabs.
+const LINKING = {
+  prefixes: ['drift://'],
+  config: {
+    initialRouteName: 'Tabs',
+    screens: {
+      Tabs: {
+        screens: {
+          // 'drift://scan' → Capture tab (renamed in 6.21; component is still Scan).
+          // Query-string parsing forwards `?image=…` to route.params.image,
+          // which the Scan screen uses for the PS-16 share-target flow.
+          Capture: {
+            path: 'scan',
+            parse: { image: (v) => v },
+          },
+          Home:    'home',
+        },
+      },
+      Add:    'add',
+      Search: 'search',
+    },
+  },
+};
+
 import HomeScreen        from '@features/home/screens/Home';
 import ScanScreen        from '@features/scan/screens/Scan';
 import TrendsScreen      from '@features/trends/screens/Trends';
@@ -12,11 +42,16 @@ import SubsScreen        from '@features/subs/screens/Subs';
 import AddScreen         from '@features/expenses/screens/Add';
 import DetailScreen      from '@features/expenses/screens/Detail';
 import PotDetailScreen   from '@features/categories/screens/PotDetail';
+import BudgetSetupScreen from '@features/categories/screens/BudgetSetup';
+import QuickTemplatesScreen from '@features/expenses/screens/QuickTemplates';
 import GoalsScreen       from '@features/goals/screens/Goals';
 import ProfileScreen     from '@features/profile/screens/Profile';
+import DiagnosticsScreen from '@features/profile/screens/Diagnostics';
 import ExportScreen      from '@features/profile/screens/Export';
 import NetWorthScreen    from '@features/accounts/screens/NetWorth';
 import TravelScreen      from '@features/travel/screens/Travel';
+import TripDetailScreen  from '@features/travel/screens/TripDetail';
+import ActivityScreen    from '@features/notifications/screens/Activity';
 import AllExpensesScreen from '@features/expenses/screens/AllExpenses';
 import SearchScreen      from '@features/expenses/screens/Search';
 import MerchantsScreen       from '@features/expenses/screens/Merchants';
@@ -31,6 +66,7 @@ import SubCalendarScreen from '@features/subs/screens/SubCalendar';
 import ManageTagsScreen  from '@features/tags/screens/ManageTags';
 import EMIScreen         from '@features/emi/screens/EMI';
 import EditEMIScreen     from '@features/emi/screens/EditEMI';
+import TaxBenefitScreen  from '@features/emi/screens/TaxBenefit';
 import VehiclesScreen      from '@features/fuel/screens/Vehicles';
 import VehicleDetailScreen from '@features/fuel/screens/VehicleDetail';
 import EditVehicleScreen   from '@features/fuel/screens/EditVehicle';
@@ -48,12 +84,21 @@ import EditUtilityScreen      from '@features/utilities/screens/EditUtility';
 import EditBillScreen         from '@features/utilities/screens/EditBill';
 import CsvImportScreen        from '@features/csv_import/screens/CsvImport';
 import CsvReviewScreen        from '@features/csv_import/screens/CsvReview';
+import HoldingsScreen         from '@features/investments/screens/Holdings';
+import EditHoldingScreen      from '@features/investments/screens/EditHolding';
+import InsuranceScreen        from '@features/insurance/screens/Insurance';
+import EditInsuranceScreen    from '@features/insurance/screens/EditInsurance';
+import FASTagScreen           from '@features/fastag/screens/FASTag';
+import EditFastagScreen       from '@features/fastag/screens/EditFastag';
 import EditGoalScreen    from '@features/goals/screens/EditGoal';
 import EditAccountScreen from '@features/accounts/screens/EditAccount';
 import EditTripScreen    from '@features/travel/screens/EditTrip';
 
 // 6.12 + 6.13 + 6.15 + 6.16 + 6.17 + 6.18 + 6.19 — new analytics screens.
 import AnalyticsHubScreen     from '@features/analytics/screens/Hub';
+import MoneyFlowScreen        from '@features/analytics/screens/MoneyFlow';
+import MoodSpendScreen        from '@features/analytics/screens/MoodSpend';
+import CarbonDashboardScreen  from '@features/analytics/screens/CarbonDashboard';
 import InflationIndexScreen   from '@features/trends/screens/InflationIndex';
 import LifestyleInflationScreen from '@features/trends/screens/LifestyleInflation';
 import ForecastScreen         from '@features/trends/screens/Forecast';
@@ -70,11 +115,16 @@ const Subs        = withBoundary('Subs',        SubsScreen);
 const Add         = withBoundary('Add',         AddScreen);
 const Detail      = withBoundary('Detail',      DetailScreen);
 const PotDetail   = withBoundary('PotDetail',   PotDetailScreen);
+const BudgetSetup = withBoundary('BudgetSetup', BudgetSetupScreen);
+const QuickTemplates = withBoundary('QuickTemplates', QuickTemplatesScreen);
 const Goals       = withBoundary('Goals',       GoalsScreen);
 const Profile     = withBoundary('Profile',     ProfileScreen);
+const Diagnostics = withBoundary('Diagnostics', DiagnosticsScreen);
 const Export      = withBoundary('Export',      ExportScreen);
 const NetWorth    = withBoundary('NetWorth',    NetWorthScreen);
 const Travel      = withBoundary('Travel',      TravelScreen);
+const TripDetail  = withBoundary('TripDetail',  TripDetailScreen);
+const Activity    = withBoundary('Activity',    ActivityScreen);
 const AllExpenses    = withBoundary('AllExpenses',    AllExpensesScreen);
 const Search         = withBoundary('Search',         SearchScreen);
 const Merchants      = withBoundary('Merchants',      MerchantsScreen);
@@ -89,6 +139,7 @@ const SubCalendar = withBoundary('SubCalendar', SubCalendarScreen);
 const ManageTags  = withBoundary('ManageTags',  ManageTagsScreen);
 const EMI         = withBoundary('EMI',         EMIScreen);
 const EditEMI     = withBoundary('EditEMI',     EditEMIScreen);
+const TaxBenefit  = withBoundary('TaxBenefit',  TaxBenefitScreen);
 const Vehicles      = withBoundary('Vehicles',      VehiclesScreen);
 const VehicleDetail = withBoundary('VehicleDetail', VehicleDetailScreen);
 const EditVehicle   = withBoundary('EditVehicle',   EditVehicleScreen);
@@ -106,10 +157,19 @@ const EditUtility      = withBoundary('EditUtility',      EditUtilityScreen);
 const EditBill         = withBoundary('EditBill',         EditBillScreen);
 const CsvImport        = withBoundary('CsvImport',        CsvImportScreen);
 const CsvReview        = withBoundary('CsvReview',        CsvReviewScreen);
+const Holdings         = withBoundary('Holdings',         HoldingsScreen);
+const EditHolding      = withBoundary('EditHolding',      EditHoldingScreen);
+const Insurance        = withBoundary('Insurance',        InsuranceScreen);
+const EditInsurance    = withBoundary('EditInsurance',    EditInsuranceScreen);
+const FASTag           = withBoundary('FASTag',           FASTagScreen);
+const EditFastag       = withBoundary('EditFastag',       EditFastagScreen);
 const EditGoal    = withBoundary('EditGoal',    EditGoalScreen);
 const EditAccount = withBoundary('EditAccount', EditAccountScreen);
 const EditTrip    = withBoundary('EditTrip',    EditTripScreen);
 const AnalyticsHub      = withBoundary('AnalyticsHub',      AnalyticsHubScreen);
+const MoneyFlow         = withBoundary('MoneyFlow',         MoneyFlowScreen);
+const MoodSpend         = withBoundary('MoodSpend',         MoodSpendScreen);
+const CarbonDashboard   = withBoundary('CarbonDashboard',   CarbonDashboardScreen);
 const InflationIndex    = withBoundary('InflationIndex',    InflationIndexScreen);
 const LifestyleInflation= withBoundary('LifestyleInflation',LifestyleInflationScreen);
 const Forecast          = withBoundary('Forecast',          ForecastScreen);
@@ -144,7 +204,7 @@ function Tabs() {
 export default function Navigation() {
   const { F } = useTheme();
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={LINKING}>
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: F.surface },
         headerTintColor: F.ink,
@@ -158,11 +218,16 @@ export default function Navigation() {
         <Stack.Screen name="PotDetail"   component={PotDetail}   options={({ route }) => ({
           title: route.params?.potName || 'Pot detail',
         })}/>
+        <Stack.Screen name="BudgetSetup" component={BudgetSetup} options={{ title: 'Budget setup' }}/>
+        <Stack.Screen name="QuickTemplates" component={QuickTemplates} options={{ title: 'Quick templates' }}/>
         <Stack.Screen name="Goals"       component={Goals}       options={{ title: 'Goals' }}/>
         <Stack.Screen name="Profile"     component={Profile}     options={{ title: 'Profile' }}/>
+        <Stack.Screen name="Diagnostics" component={Diagnostics} options={{ title: 'Diagnostics' }}/>
         <Stack.Screen name="Export"      component={Export}      options={{ presentation: 'modal', headerShown: false }}/>
         <Stack.Screen name="NetWorth"    component={NetWorth}    options={{ title: 'Net Worth' }}/>
         <Stack.Screen name="Travel"      component={Travel}      options={{ title: 'Travel' }}/>
+        <Stack.Screen name="TripDetail"  component={TripDetail}  options={{ title: 'Trip detail' }}/>
+        <Stack.Screen name="Activity"    component={Activity}    options={{ title: 'Activity' }}/>
         <Stack.Screen name="AllExpenses" component={AllExpenses} options={{ title: 'All transactions' }}/>
         <Stack.Screen name="Search"      component={Search}      options={{ presentation: 'modal', headerShown: false }}/>
         <Stack.Screen name="Merchants"   component={Merchants}   options={{ title: 'Top merchants' }}/>
@@ -193,6 +258,12 @@ export default function Navigation() {
           options={{ title: 'Lifestyle drift' }}/>
         <Stack.Screen name="Forecast"           component={Forecast}
           options={{ title: 'Forecast' }}/>
+        <Stack.Screen name="MoneyFlow"          component={MoneyFlow}
+          options={{ title: 'Money flow' }}/>
+        <Stack.Screen name="MoodSpend"          component={MoodSpend}
+          options={{ title: 'Mood × spend' }}/>
+        <Stack.Screen name="CarbonDashboard"    component={CarbonDashboard}
+          options={{ title: 'Carbon footprint' }}/>
         <Stack.Screen name="Calendar"           component={Calendar}
           options={{ title: 'Spending calendar' }}/>
         <Stack.Screen name="Variance"           component={Variance}
@@ -218,6 +289,9 @@ export default function Navigation() {
           options={{ title: 'EMIs & loans' }}/>
         <Stack.Screen name="EditEMI"            component={EditEMI}
           options={({ route }) => ({ title: route?.params?.id ? 'Edit EMI' : 'Add EMI' })}/>
+        {/* PS-12 — Tax-benefit dashboard + prepayment simulator. */}
+        <Stack.Screen name="TaxBenefit"         component={TaxBenefit}
+          options={{ title: 'Tax benefit' }}/>
 
         {/* 7.6 — Fuel & vehicle tracking. */}
         <Stack.Screen name="Vehicles"           component={Vehicles}
@@ -264,6 +338,24 @@ export default function Navigation() {
           options={{ title: 'Import CSV' }}/>
         <Stack.Screen name="CsvReview"          component={CsvReview}
           options={{ title: 'Review import' }}/>
+
+        {/* PS-10 — Investment holdings + manual NAV tracker. */}
+        <Stack.Screen name="Holdings"           component={Holdings}
+          options={{ title: 'Investments' }}/>
+        <Stack.Screen name="EditHolding"        component={EditHolding}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit holding' : 'Add holding' })}/>
+
+        {/* PS-11 — Insurance policy tracker. */}
+        <Stack.Screen name="Insurance"          component={Insurance}
+          options={{ title: 'Insurance' }}/>
+        <Stack.Screen name="EditInsurance"      component={EditInsurance}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit policy' : 'Add policy' })}/>
+
+        {/* PS-13 — FASTag tracking. */}
+        <Stack.Screen name="FASTag"             component={FASTag}
+          options={{ title: 'FASTag' }}/>
+        <Stack.Screen name="EditFastag"         component={EditFastag}
+          options={({ route }) => ({ title: route?.params?.id ? 'Edit FASTag' : 'Add FASTag' })}/>
       </Stack.Navigator>
     </NavigationContainer>
   );

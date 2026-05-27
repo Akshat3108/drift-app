@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, Image, Dimensions, ActivityIndicator } from 'react-native';
 import { useTheme } from '@core/theme/ThemeContext';
-import { persistReceipt } from '@features/scan/receiptStorage';
+import { persistReceipt } from '@media/receipts';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { pickReceiptUri, needsMigration } from '@features/expenses/receiptUri';
 import { logError } from '@core/utils/log';
@@ -64,15 +64,18 @@ export default function ReceiptViewer({ visible, expense, onClose, onMigrated })
     (async () => {
       setMigrating(true);
       try {
-        const stored = await persistReceipt(row.receipt_uri);
+        // 8.6 — pass the row's expense_date so the lazy-migrated WebP files
+        // land in the same yyyy/mm partition as same-month fresh scans.
+        const stored = await persistReceipt(row.receipt_uri, { expenseDate: row.expense_date });
         if (cancelled || !stored) return;
         await expRepo.attachReceiptStorage(row.id, stored);
         if (cancelled) return;
         const next = {
           ...row,
-          receipt_path: stored.path,
-          receipt_thumb: stored.thumb,
-          receipt_bytes: stored.bytes,
+          receipt_path:       stored.path,
+          receipt_thumb:      stored.thumb,
+          receipt_bytes:      stored.bytes,
+          receipt_image_hash: stored.imageHash,
         };
         setRow(next);
         onMigrated?.(next);

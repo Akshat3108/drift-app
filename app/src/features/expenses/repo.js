@@ -50,6 +50,29 @@ export const expenses = {
     return row?.n ?? 0;
   },
 
+  // 5.F.01 — Archive-mode reads. Powers the AllExpenses "View archive" toggle.
+  // archive_expenses has no triggers, no FTS shadow, and (deliberately) no FK
+  // to live tables — so category_name/emoji/color join falls back gracefully
+  // to NULL when the live category has since been hard-deleted. Filter and
+  // selection-mode actions are intentionally unsupported in archive mode; the
+  // UI exposes a flat paged list only.
+  async listArchive({ limit = 200, offset = 0 } = {}) {
+    return all(
+      `SELECT a.*, c.name AS category_name, c.emoji AS category_emoji,
+              c.color AS category_color
+         FROM archive_expenses a
+         LEFT JOIN categories c ON c.id = a.category_id
+        ORDER BY a.expense_date DESC, a.id DESC
+        LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+  },
+
+  async archiveCount() {
+    const row = await one(`SELECT COUNT(*) AS n FROM archive_expenses`);
+    return row?.n ?? 0;
+  },
+
   async get(id) {
     return one(
       `SELECT e.*, c.name AS category_name, c.emoji AS category_emoji,
@@ -61,7 +84,7 @@ export const expenses = {
     );
   },
 
-  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id }) {
+  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id, insurance_policy_id, fastag_account_id }) {
     // 5.9 — manual Add path now resolves the merchant text to merchants.id so
     // MerchantDetail + topMerchants can include quick-spend rows. Caller may
     // pass an explicit `merchant_id` (autocomplete picked a known merchant);
@@ -72,8 +95,8 @@ export const expenses = {
       ? merchant_id
       : await merchants.resolve(merchant);
     const res = await exec(
-      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?)`,
+      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id, insurance_policy_id, fastag_account_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?)`,
       [
         category_id ?? null,
         merchant,
@@ -87,6 +110,8 @@ export const expenses = {
         expense_date ?? null,
         payment_method ?? null,
         emi_loan_id ?? null,
+        insurance_policy_id ?? null,
+        fastag_account_id ?? null,
       ]
     );
     return this.get(res.lastInsertRowId);
@@ -106,7 +131,7 @@ export const expenses = {
       `UPDATE expenses SET
         category_id = ?, merchant = ?, merchant_id = ?, amount = ?, mood = ?,
         carbon = ?, recurring = ?, notes = ?, receipt_uri = ?, expense_date = ?,
-        payment_method = ?, emi_loan_id = ?
+        payment_method = ?, emi_loan_id = ?, insurance_policy_id = ?, fastag_account_id = ?
        WHERE id = ?`,
       [
         next.category_id ?? null,
@@ -121,6 +146,8 @@ export const expenses = {
         next.expense_date,
         next.payment_method ?? null,
         next.emi_loan_id ?? null,
+        next.insurance_policy_id ?? null,
+        next.fastag_account_id ?? null,
         id,
       ]
     );
@@ -162,15 +189,19 @@ export const expenses = {
   // receipt_uri intact: that's the safety net if persistReceipt happens to
   // be writing to a different documentDirectory across a future expo
   // upgrade.
-  async attachReceiptStorage(id, { path, thumb, bytes }) {
+  async attachReceiptStorage(id, { path, thumb, bytes, imageHash }) {
     if (id == null || !path) return;
+    // 8.6 — receipt_image_hash is optional. Lazy-migrate calls that pre-date
+    // the hash pipeline pass it through as null; future maintenance-job
+    // backfill (8.7) can fill in NULLs without re-running persistReceipt.
     await exec(
       `UPDATE expenses
-          SET receipt_path  = ?,
-              receipt_thumb = ?,
-              receipt_bytes = ?
+          SET receipt_path       = ?,
+              receipt_thumb      = ?,
+              receipt_bytes      = ?,
+              receipt_image_hash = COALESCE(?, receipt_image_hash)
         WHERE id = ?`,
-      [path, thumb ?? null, bytes ?? null, id]
+      [path, thumb ?? null, bytes ?? null, imageHash ?? null, id]
     );
   },
 
@@ -223,6 +254,27 @@ export const expenses = {
           `UPDATE receipt_items SET deleted_at = NULL
             WHERE expense_id IN (${placeholders})`,
           slice
+        );
+      }
+    });
+    return clean.length;
+  },
+
+  // PS-07 — batch trip-tag. Same transactional + chunking discipline as
+  // bulkUpdateCategory. A null trip_id is allowed (clears the tag).
+  async bulkUpdateTrip(ids, trip_id) {
+    if (!Array.isArray(ids) || ids.length === 0) return 0;
+    const db = await getDB();
+    const clean = ids.filter((x) => Number.isFinite(x));
+    if (!clean.length) return 0;
+    const CHUNK = 500;
+    await db.withTransactionAsync(async () => {
+      for (let i = 0; i < clean.length; i += CHUNK) {
+        const slice = clean.slice(i, i + CHUNK);
+        const placeholders = slice.map(() => '?').join(',');
+        await db.runAsync(
+          `UPDATE expenses SET trip_id = ? WHERE id IN (${placeholders})`,
+          [trip_id ?? null, ...slice]
         );
       }
     });
@@ -306,8 +358,8 @@ export const expenses = {
         `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date,
                                gstin, invoice_number, cgst, sgst, igst,
                                receipt_hash, receipt_soft_hash, payment_method,
-                               receipt_path, receipt_thumb, receipt_bytes, emi_loan_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               receipt_path, receipt_thumb, receipt_bytes, receipt_image_hash, emi_loan_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           expense.category_id ?? null,
           expense.merchant,
@@ -330,6 +382,7 @@ export const expenses = {
           expense.receipt_path ?? null,
           expense.receipt_thumb ?? null,
           expense.receipt_bytes ?? null,
+          expense.receipt_image_hash ?? null,
           expense.emi_loan_id ?? null,
         ]
       );

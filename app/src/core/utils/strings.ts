@@ -3,6 +3,7 @@
 // for resolving an OCR'd merchant string against the merchants table.
 //
 // Kept pure (no React, no DB) so /tmp validators can import directly.
+// PS-18 — TypeScript pilot.
 
 // Jaro-Winkler similarity in [0, 1]. Standard algorithm:
 //   1. Find matching characters within a window of floor(max(|a|,|b|)/2) - 1.
@@ -12,7 +13,7 @@
 //      capped at 4 and p = 0.1.
 //
 // Returns 0 when either input is empty (matches the conventional definition).
-export function jaroWinkler(a, b) {
+export function jaroWinkler(a: string, b: string): number {
   if (!a || !b) return 0;
   if (a === b) return 1;
 
@@ -20,8 +21,8 @@ export function jaroWinkler(a, b) {
   const bLen = b.length;
   const matchWindow = Math.max(0, Math.floor(Math.max(aLen, bLen) / 2) - 1);
 
-  const aMatches = new Array(aLen).fill(false);
-  const bMatches = new Array(bLen).fill(false);
+  const aMatches: boolean[] = new Array(aLen).fill(false);
+  const bMatches: boolean[] = new Array(bLen).fill(false);
 
   let matches = 0;
   for (let i = 0; i < aLen; i++) {
@@ -64,7 +65,7 @@ export function jaroWinkler(a, b) {
 // "Starbucks Indiranagar").
 const COMPANY_SUFFIX_RE = /\s+(?:pvt\.?\s*ltd\.?|private\s+limited|llp|inc\.?|co\.?)\s*$/i;
 
-export function lightNormMerchant(name) {
+export function lightNormMerchant(name: string | null | undefined): string {
   if (!name) return '';
   let s = String(name).toLowerCase().trim().replace(/\s+/g, ' ');
   // Run the suffix strip up to twice to catch "starbucks pvt ltd co".

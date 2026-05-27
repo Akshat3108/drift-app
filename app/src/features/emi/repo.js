@@ -33,6 +33,7 @@ export const emiRepo = {
     name, lender = null, principal, annual_rate_pct, tenure_months,
     start_date, installments_paid = 0, emi_override = null,
     bill_day = 1, notes = null, icon = null, color = null,
+    kind = null, tax_eligible = null,
   }) {
     const existing = await all('SELECT COUNT(*) AS n FROM emi_loans');
     const fallbackIdx = (existing?.[0]?.n ?? 0);
@@ -40,14 +41,16 @@ export const emiRepo = {
       `INSERT INTO emi_loans
          (name, lender, principal, annual_rate_pct, tenure_months,
           start_date, installments_paid, emi_override, bill_day,
-          notes, icon, color)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          notes, icon, color, kind, tax_eligible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name, lender, principal, annual_rate_pct, tenure_months,
         start_date, installments_paid, emi_override, bill_day,
         notes,
         icon  || pickIcon(fallbackIdx),
         color || pickColor(fallbackIdx),
+        kind,
+        tax_eligible == null ? null : (tax_eligible ? 1 : 0),
       ]
     );
     return this.get(res.lastInsertRowId);
@@ -61,12 +64,15 @@ export const emiRepo = {
       `UPDATE emi_loans SET
          name = ?, lender = ?, principal = ?, annual_rate_pct = ?,
          tenure_months = ?, start_date = ?, installments_paid = ?,
-         emi_override = ?, bill_day = ?, notes = ?, icon = ?, color = ?
+         emi_override = ?, bill_day = ?, notes = ?, icon = ?, color = ?,
+         kind = ?, tax_eligible = ?
        WHERE id = ?`,
       [
         next.name, next.lender, next.principal, next.annual_rate_pct,
         next.tenure_months, next.start_date, next.installments_paid,
         next.emi_override, next.bill_day, next.notes, next.icon, next.color,
+        next.kind ?? null,
+        next.tax_eligible == null ? null : (next.tax_eligible ? 1 : 0),
         id,
       ]
     );

@@ -1514,6 +1514,21 @@ ALTER TABLE settings ADD COLUMN privacy_hide_on_minimize    INTEGER NOT NULL DEF
 ALTER TABLE settings ADD COLUMN privacy_mask_amounts_always INTEGER NOT NULL DEFAULT 0;
 `;
 
+// v50 — PS-25 time-of-day capture. Two additive ALTERs:
+//   - `expenses.expense_time TEXT NULL`         (HH:MM local; stamped by
+//                                                Add.js when the setting is
+//                                                ON. Scan + EditExpense leave
+//                                                it NULL by Step-2 design.)
+//   - `settings.capture_expense_time INTEGER`   (opt-in flag; default 0 so
+//                                                no UX change for existing
+//                                                installs until toggled).
+// First merged column from the post_187_supplement_v2 v50 manifest; the
+// remaining columns from that manifest stay deferred until their tasks ship.
+const V50_SQL = `
+ALTER TABLE expenses ADD COLUMN expense_time TEXT NULL;
+ALTER TABLE settings ADD COLUMN capture_expense_time INTEGER NOT NULL DEFAULT 0;
+`;
+
 // v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
 // vehicle, identified by the tag_id printed on the sticker). `current_balance`
 // is the last-known wallet balance from a recharge / CSV import / manual
@@ -1844,6 +1859,11 @@ export const migrations = [
     version: 49,
     name: 'privacy-settings',
     up: async (db) => { await db.execAsync(V49_SQL); },
+  },
+  {
+    version: 50,
+    name: 'expense-time',
+    up: async (db) => { await db.execAsync(V50_SQL); },
   },
 ];
 

@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { income as incRepo } from '@features/income/repo';
+import { suggestBudgets } from '../../../analytics';
 import { potBg } from '../../../theme';
 import { prevMonth, currentMonthKey, formatMonthLabel } from '@components/primitives/MonthPicker';
 
@@ -76,6 +77,10 @@ function BudgetSetup({ navigation }) {
   const [lastMonthSpend, setLastMonthSpend] = useState(new Map());
   const [confirmCopy, setConfirmCopy] = useState(false);
   const [applying, setApplying] = useState(false);
+  // PS-26 — Smart suggest review state.
+  const [suggestion, setSuggestion] = useState(null); // { suggestions: [...] } | null
+  const [loadingSuggest, setLoadingSuggest] = useState(false);
+  const [applyingSuggest, setApplyingSuggest] = useState(false);
 
   const prevMK = useMemo(() => prevMonth(currentMonthKey()), []);
 
@@ -113,6 +118,40 @@ function BudgetSetup({ navigation }) {
       Alert.alert('Could not update', e?.message || String(e));
     }
   }, [updateCategory]);
+
+  // PS-26 — Smart suggest: open the review overlay with computed suggestions.
+  const openSmartSuggest = useCallback(async () => {
+    setLoadingSuggest(true);
+    try {
+      const result = await suggestBudgets();
+      if (!result?.ready || result.suggestions.length === 0) {
+        Alert.alert('Nothing to suggest',
+          'Log a few weeks of spending and try again — Smart suggest needs at least one month of data per category.');
+        return;
+      }
+      setSuggestion(result);
+    } catch (e) {
+      Alert.alert('Could not compute', e?.message || String(e));
+    } finally {
+      setLoadingSuggest(false);
+    }
+  }, []);
+
+  const applySmartSuggest = useCallback(async () => {
+    if (!suggestion?.suggestions?.length) return;
+    setApplyingSuggest(true);
+    try {
+      for (const s of suggestion.suggestions) {
+        if (s.suggestion === s.current_budget) continue;
+        await updateCategory(s.category_id, { budget: s.suggestion });
+      }
+      setSuggestion(null);
+    } catch (e) {
+      Alert.alert('Apply failed midway', e?.message || String(e));
+    } finally {
+      setApplyingSuggest(false);
+    }
+  }, [suggestion, updateCategory]);
 
   const copyFromLastMonth = useCallback(async () => {
     const patches = applyCopyMap(pots, lastMonthSpend);
@@ -222,6 +261,82 @@ function BudgetSetup({ navigation }) {
             <TouchableOpacity
               onPress={() => setConfirmCopy(false)}
               disabled={applying}
+              activeOpacity={0.85}
+              style={{ flex: 1, backgroundColor: F.surface, borderWidth: 1, borderColor: F.line,
+                borderRadius: 12, paddingVertical: 10, alignItems: 'center' }}>
+              <Text style={{ color: F.ink2, fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* PS-26 — Smart suggest CTA + review overlay */}
+      {!suggestion ? (
+        <TouchableOpacity
+          onPress={openSmartSuggest}
+          disabled={loadingSuggest}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Smart suggest budgets from your spending history"
+          style={{ marginTop: 10, backgroundColor: F.cream, borderRadius: 14,
+            paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: F.line,
+            opacity: loadingSuggest ? 0.6 : 1 }}>
+          <Text style={{ color: F.ink, fontSize: 14, fontWeight: '600' }}>
+            {loadingSuggest ? 'Computing…' : '✨ Smart suggest'}
+          </Text>
+          <Text style={{ fontSize: 11, color: F.ink3, marginTop: 2, textAlign: 'center', paddingHorizontal: 8 }}>
+            p75 of last 6 months × seasonal multiplier, rounded up to ₹100
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={{ marginTop: 10, backgroundColor: F.surface, borderRadius: 14,
+          borderWidth: 1, borderColor: F.coral, padding: 12 }}>
+          <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600', marginBottom: 4 }}>
+            Apply suggested budgets?
+          </Text>
+          <Text style={{ fontSize: 11, color: F.ink3, marginBottom: 10 }}>
+            {suggestion.multiplier_source === 'flat'
+              ? 'Pure p75 — not enough history yet for a seasonal adjustment.'
+              : suggestion.multiplier_source === 'clamped'
+                ? `Seasonal multiplier clamped to ${suggestion.multiplier.toFixed(2)}×.`
+                : `Seasonal multiplier ${suggestion.multiplier.toFixed(2)}× for this month.`}
+          </Text>
+          {suggestion.suggestions.map((s) => {
+            const same = s.suggestion === s.current_budget;
+            return (
+              <View key={s.category_id}
+                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
+                  borderTopWidth: 1, borderTopColor: F.line }}>
+                <Text style={{ flex: 1, fontSize: 13, color: F.ink }} numberOfLines={1}>
+                  {s.emoji} {s.name}
+                  {s.low_confidence && (
+                    <Text style={{ fontSize: 9, color: F.ink3 }}> · low conf.</Text>
+                  )}
+                </Text>
+                <Text style={{ fontSize: 12, color: same ? F.ink3 : F.ink2 }}>
+                  {sym}{Math.round(s.current_budget || 0).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 12, color: F.ink3, marginHorizontal: 6 }}>→</Text>
+                <Text style={{ fontSize: 13, color: same ? F.ink3 : F.coral, fontWeight: '700', minWidth: 64, textAlign: 'right' }}>
+                  {sym}{Math.round(s.suggestion).toLocaleString()}
+                </Text>
+              </View>
+            );
+          })}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+            <TouchableOpacity
+              onPress={applySmartSuggest}
+              disabled={applyingSuggest}
+              activeOpacity={0.85}
+              style={{ flex: 1, backgroundColor: F.coral, borderRadius: 12,
+                paddingVertical: 10, alignItems: 'center', opacity: applyingSuggest ? 0.6 : 1 }}>
+              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
+                {applyingSuggest ? 'Applying…' : 'Apply'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setSuggestion(null)}
+              disabled={applyingSuggest}
               activeOpacity={0.85}
               style={{ flex: 1, backgroundColor: F.surface, borderWidth: 1, borderColor: F.line,
                 borderRadius: 12, paddingVertical: 10, alignItems: 'center' }}>

@@ -64,3 +64,21 @@ export { moneyFlow } from './flow';
 
 // PS-02 — Mood × spend aggregator (per-mood totals + per-(cat,mood) deltas).
 export { moodAggregates } from './mood';
+
+// PS-22 — Composite Financial Health Score + the canonical savings-rate
+// helper lifted out of Home.js so analytics callers + the hero share one
+// formula.
+export { financialHealthScore } from './health';
+export { currentSavingsRate, savingsRatePercent } from './income';
+
+// PS-23 — No-spend / in-budget streak tracker.
+export { currentStreak, bestStreak, noSpendDayMap } from './streaks';
+
+// PS-24 — Year-in-Review retrospective aggregator.
+export { yearRollup } from './yearReview';
+
+// PS-25 — Hour-of-day spend histogram (opt-in `expense_time` capture).
+export { hourOfDayHistogram } from './timeOfDay';
+
+// PS-26 — Budget recommendation engine (p75 × seasonal multiplier).
+export { suggestBudgets } from './budgetSuggest';

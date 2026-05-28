@@ -12,6 +12,7 @@ const DEFAULTS = {
   privacy_block_screenshots: 0,
   privacy_hide_on_minimize: 0,
   privacy_mask_amounts_always: 0,
+  capture_expense_time: 0,
 };
 
 export const settings = {
@@ -27,8 +28,9 @@ export const settings = {
                              notifications_enabled, notif_budget_threshold, notif_sub_lead_days,
                              app_lock_enabled,
                              privacy_block_screenshots, privacy_hide_on_minimize,
-                             privacy_mask_amounts_always)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             privacy_mask_amounts_always,
+                             capture_expense_time)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          currency               = excluded.currency,
          dark_mode              = excluded.dark_mode,
@@ -40,7 +42,8 @@ export const settings = {
          app_lock_enabled       = excluded.app_lock_enabled,
          privacy_block_screenshots   = excluded.privacy_block_screenshots,
          privacy_hide_on_minimize    = excluded.privacy_hide_on_minimize,
-         privacy_mask_amounts_always = excluded.privacy_mask_amounts_always`,
+         privacy_mask_amounts_always = excluded.privacy_mask_amounts_always,
+         capture_expense_time   = excluded.capture_expense_time`,
       [
         next.currency,
         next.dark_mode ? 1 : 0,
@@ -53,6 +56,7 @@ export const settings = {
         next.privacy_block_screenshots ? 1 : 0,
         next.privacy_hide_on_minimize ? 1 : 0,
         next.privacy_mask_amounts_always ? 1 : 0,
+        next.capture_expense_time ? 1 : 0,
       ]
     );
     return this.get();

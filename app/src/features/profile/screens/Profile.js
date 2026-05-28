@@ -360,6 +360,10 @@ function Profile({ navigation }) {
           right={<Toggle value={!!settings.dark_mode} onChange={v => setSetting('dark_mode', v ? 1 : 0)} F={F}/>}/>
         <Row icon="🌱" label="Carbon tracking" sub="CO₂ estimate per expense" F={F}
           right={<Toggle value={!!settings.carbon_tracking} onChange={v => setSetting('carbon_tracking', v ? 1 : 0)} F={F}/>}/>
+        {/* PS-25 — Opt-in `expense_time` capture for the hour-of-day heatmap. */}
+        <Row icon="🕐" label="Capture expense time" sub="Stamp HH:MM on new entries" F={F}
+          right={<Toggle value={!!settings.capture_expense_time}
+                         onChange={v => setSetting('capture_expense_time', v ? 1 : 0)} F={F}/>}/>
       </View>
 
       <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,

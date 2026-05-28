@@ -99,6 +99,8 @@ import AnalyticsHubScreen     from '@features/analytics/screens/Hub';
 import MoneyFlowScreen        from '@features/analytics/screens/MoneyFlow';
 import MoodSpendScreen        from '@features/analytics/screens/MoodSpend';
 import CarbonDashboardScreen  from '@features/analytics/screens/CarbonDashboard';
+import HealthDetailScreen     from '@features/analytics/screens/HealthDetail';
+import YearInReviewScreen     from '@features/analytics/screens/YearInReview';
 import InflationIndexScreen   from '@features/trends/screens/InflationIndex';
 import LifestyleInflationScreen from '@features/trends/screens/LifestyleInflation';
 import ForecastScreen         from '@features/trends/screens/Forecast';
@@ -170,6 +172,8 @@ const AnalyticsHub      = withBoundary('AnalyticsHub',      AnalyticsHubScreen);
 const MoneyFlow         = withBoundary('MoneyFlow',         MoneyFlowScreen);
 const MoodSpend         = withBoundary('MoodSpend',         MoodSpendScreen);
 const CarbonDashboard   = withBoundary('CarbonDashboard',   CarbonDashboardScreen);
+const HealthDetail      = withBoundary('HealthDetail',      HealthDetailScreen);
+const YearInReview      = withBoundary('YearInReview',      YearInReviewScreen);
 const InflationIndex    = withBoundary('InflationIndex',    InflationIndexScreen);
 const LifestyleInflation= withBoundary('LifestyleInflation',LifestyleInflationScreen);
 const Forecast          = withBoundary('Forecast',          ForecastScreen);
@@ -264,6 +268,12 @@ export default function Navigation() {
           options={{ title: 'Mood × spend' }}/>
         <Stack.Screen name="CarbonDashboard"    component={CarbonDashboard}
           options={{ title: 'Carbon footprint' }}/>
+        {/* PS-22 — Financial Health Score breakdown. */}
+        <Stack.Screen name="HealthDetail"       component={HealthDetail}
+          options={{ title: 'Financial health' }}/>
+        {/* PS-24 — Year-in-Review (Oct-gated entry from Analytics Hub). */}
+        <Stack.Screen name="YearInReview"       component={YearInReview}
+          options={{ title: 'Year in Review' }}/>
         <Stack.Screen name="Calendar"           component={Calendar}
           options={{ title: 'Spending calendar' }}/>
         <Stack.Screen name="Variance"           component={Variance}

@@ -84,7 +84,7 @@ export const expenses = {
     );
   },
 
-  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id, insurance_policy_id, fastag_account_id }) {
+  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time }) {
     // 5.9 — manual Add path now resolves the merchant text to merchants.id so
     // MerchantDetail + topMerchants can include quick-spend rows. Caller may
     // pass an explicit `merchant_id` (autocomplete picked a known merchant);
@@ -95,8 +95,8 @@ export const expenses = {
       ? merchant_id
       : await merchants.resolve(merchant);
     const res = await exec(
-      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id, insurance_policy_id, fastag_account_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?)`,
+      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?)`,
       [
         category_id ?? null,
         merchant,
@@ -112,6 +112,7 @@ export const expenses = {
         emi_loan_id ?? null,
         insurance_policy_id ?? null,
         fastag_account_id ?? null,
+        expense_time ?? null,
       ]
     );
     return this.get(res.lastInsertRowId);
@@ -668,28 +669,12 @@ export const expenses = {
     );
   },
 
+  // PS-23 — delegates to the canonical streak tracker in
+  // `analytics/streaks.js`. Kept as a repo passthrough so existing callers
+  // (`useHomeDashboard`, expenses context action) don't need to rewire.
   async streakDays() {
-    const rows = await all(
-      `SELECT expense_date AS d, SUM(amount) AS total
-       FROM expenses
-       WHERE ${NOT_DELETED} AND date(expense_date) >= date('now', '-60 days')
-       GROUP BY expense_date
-       ORDER BY expense_date DESC`
-    );
-    const budgetRow = await one(`SELECT COALESCE(SUM(budget), 0) AS total FROM categories WHERE ${NOT_DELETED}`);
-    const monthlyBudget = budgetRow?.total || 0;
-    if (monthlyBudget <= 0) return 0;
-    const daily = monthlyBudget / 30;
-    const map = new Map(rows.map(r => [r.d, r.total]));
-    let streak = 0;
-    for (let i = 0; i < 60; i++) {
-      const day = new Date();
-      day.setDate(day.getDate() - i);
-      const key = day.toISOString().slice(0, 10);
-      const spent = map.get(key) || 0;
-      if (spent <= daily) streak++;
-      else break;
-    }
+    const { currentStreak } = require('../../analytics/streaks');
+    const { streak } = await currentStreak({ mode: 'in_budget' });
     return streak;
   },
 };

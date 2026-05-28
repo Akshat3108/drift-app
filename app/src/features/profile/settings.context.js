@@ -17,6 +17,7 @@ const DEFAULTS = {
   privacy_block_screenshots: 0,
   privacy_hide_on_minimize: 0,
   privacy_mask_amounts_always: 0,
+  capture_expense_time: 0,
 };
 
 export function SettingsProvider({ children }) {

@@ -200,6 +200,13 @@ function Hub({ navigation }) {
             F={{ ...F, line: 'transparent' }}
             onPress={() => navigation.navigate('Trends')}/>
         </View>
+        {/* PS-24 — Year-in-Review. Gated until Oct so it appears once the
+            calendar year has enough data to feel like a retrospective. */}
+        {new Date().getMonth() >= 9 && (
+          <ReportRow icon="📜" title="Year in Review"
+            sub="Top categories, merchants, items + YoY"
+            F={F} onPress={() => navigation.navigate('YearInReview')}/>
+        )}
         <ReportRow icon="🎯" title="End-of-month forecast"
           sub="3-model ensemble + confidence cone"
           F={F} onPress={() => navigation.navigate('Forecast')}/>

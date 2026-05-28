@@ -26,6 +26,8 @@ export const SCOPES = Object.freeze({
   LIFESTYLE:     'lifestyle',
   ANOMALY:       'anomaly',
   PATTERNS:      'patterns',
+  HEALTH:        'health',
+  STREAKS:       'streaks',
 });
 
 const VALID_SCOPES = new Set(Object.values(SCOPES));

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
@@ -11,6 +11,7 @@ import ExpectedThisMonth from '../components/ExpectedThisMonth';
 import { withProfiler } from '@core/utils/perf';
 import { MonthPicker, currentMonthKey, formatMonthLabel } from '@components/primitives/MonthPicker';
 import { useNotifications } from '@features/notifications/context';
+import { savingsRatePercent, financialHealthScore } from '../../../analytics';
 
 function Home({ navigation }) {
   const { F, sym, profile, pots, expenses, totalSpend, totalIncome, monthBudget, refresh,
@@ -25,16 +26,24 @@ function Home({ navigation }) {
   const left = Math.max(0, monthBudget - totalSpend);
   const leftCents = ((left % 1) * 100).toFixed(0).padStart(2, '0');
 
-  // 5.6 — savings rate = (income - expenses) / income, current month.
-  // Negative-income (over-spent) cases display rate at 0 but show the gap
-  // verbally; this keeps the widget honest without flashing red on a Home
-  // that already has the budget-overrun forecast block at the bottom.
+  // 5.6 — savings rate. Formula lifted into `analytics/income.js` so PS-22
+  // (Financial Health Score) and PS-43 (income breakdown) share one helper.
   const savings = totalIncome - totalSpend;
-  const savingsRate = totalIncome > 0
-    ? Math.max(0, Math.min(100, Math.round((savings / totalIncome) * 100)))
-    : 0;
+  const savingsRate = savingsRatePercent(totalIncome, totalSpend);
   const showSavings = totalIncome > 0;
   const savingsPositive = savings >= 0;
+
+  // PS-22 — composite health score. Cached 12 h via analytics_cache; suppressed
+  // when the install has < 30 days of data (score === null) so the hero stays
+  // uncluttered for fresh installs.
+  const [health, setHealth] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    financialHealthScore({ monthKey: activeMonth })
+      .then((res) => { if (!cancelled) setHealth(res); })
+      .catch((e) => { logError('home.health', e); });
+    return () => { cancelled = true; };
+  }, [activeMonth, totalSpend, totalIncome]);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -242,6 +251,25 @@ function Home({ navigation }) {
         </View>
       </View>
 
+      {/* PS-22 — Financial Health Score pill. Suppressed when fresh-install
+          empty-state returns score===null. */}
+      {health && health.score != null && (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('HealthDetail')}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel={`Financial health ${health.score} of 100`}
+          style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+            backgroundColor: F.cream, borderWidth: 1, borderColor: F.line,
+            paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99, marginBottom: 16 }}>
+          <Text style={{ fontSize: 13, color: F.coral, fontWeight: '700' }}>✿</Text>
+          <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>
+            Health {health.score}/100
+          </Text>
+          <Text style={{ fontSize: 11, color: F.ink3 }}>›</Text>
+        </TouchableOpacity>
+      )}
+
       {showSavings && (
         <View style={{ backgroundColor: F.cream, borderRadius: 22, padding: 18, marginBottom: 20,
           flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -325,21 +353,16 @@ function Home({ navigation }) {
         </View>
       )}
 
-      {streak >= 1 && (
-        <View style={{ backgroundColor: F.cream, borderRadius: 18, padding: 16,
-          flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: F.surface,
-            alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 24 }}>🔥</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 15, color: F.ink }}>
-              <Text style={{ fontStyle: 'italic' }}>{streak}-day</Text> streak — under budget
-            </Text>
-            <Text style={{ fontSize: 12, color: F.ink2, marginTop: 2 }}>
-              Keep going ✿
-            </Text>
-          </View>
+      {/* PS-23 — In-budget streak chip. Suppressed below 3 days per spec
+          ("no shaming UX"). Same pill language as the PS-22 Health chip. */}
+      {streak >= 3 && (
+        <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+          backgroundColor: F.cream, borderWidth: 1, borderColor: F.line,
+          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99, marginBottom: 24 }}>
+          <Text style={{ fontSize: 13 }}>🔥</Text>
+          <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>
+            {streak}-day in-budget streak
+          </Text>
         </View>
       )}
 

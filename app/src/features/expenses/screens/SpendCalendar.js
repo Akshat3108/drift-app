@@ -29,6 +29,7 @@ import {
   SUB_CAL_WEEKDAY_HEAD,
 } from '@features/subs/projection';
 import { logError } from '@core/utils/log';
+import { hourOfDayHistogram } from '../../../analytics';
 
 const MAX_PAGE_BACK    = 24;  // 2 years of look-back
 const MAX_PAGE_FORWARD = 1;   // back-dated entries can land in the next month
@@ -161,13 +162,22 @@ function MonthGrid({ year, monthIndex, byDay, maxTotal, selectedDay, setSelected
             ? F.coral
             : isToday ? F.coral : F.line;
 
+          // PS-23 — no-spend mark. Only flag past-or-today days; future days
+          // in the visible month aren't no-spend, they just haven't happened.
+          // Uses the already-loaded `byDay` map (the absence of a key is the
+          // signal) instead of a second SQL fetch via `noSpendDayMap`.
+          const isPastOrToday = year < today.year
+            || (year === today.year && (monthIndex < today.monthIndex
+              || (monthIndex === today.monthIndex && c.day <= today.day)));
+          const showNoSpendDot = !hasSpend && isPastOrToday && !isSelected;
+
           return (
             <View key={idx} style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 2 }}>
               <TouchableOpacity
                 onPress={() => setSelectedDay(c.day)}
                 activeOpacity={hasSpend ? 0.7 : 1}
                 accessibilityRole="button"
-                accessibilityLabel={`Day ${c.day}${hasSpend ? `, ${entry.txn_count} expense${entry.txn_count === 1 ? '' : 's'}` : ''}`}
+                accessibilityLabel={`Day ${c.day}${hasSpend ? `, ${entry.txn_count} expense${entry.txn_count === 1 ? '' : 's'}` : (isPastOrToday ? ', no spend' : '')}`}
                 accessibilityState={{ selected: isSelected }}
                 style={{
                   flex: 1, borderRadius: 10,
@@ -180,6 +190,13 @@ function MonthGrid({ year, monthIndex, byDay, maxTotal, selectedDay, setSelected
                 <Text style={{ fontSize: 11, color: dayColor, fontWeight: isToday ? '700' : '500' }}>
                   {c.day}
                 </Text>
+                {showNoSpendDot && (
+                  <Text style={{
+                    position: 'absolute', bottom: 2, left: 0, right: 0,
+                    textAlign: 'center',
+                    fontSize: 10, color: F.sageD || F.ink3, fontWeight: '700',
+                  }}>·</Text>
+                )}
               </TouchableOpacity>
             </View>
           );
@@ -256,6 +273,119 @@ function SelectionCallout({ year, monthIndex, day, dayTotal, dayExpenses, loadin
   );
 }
 
+// PS-25 — Days / By hour segmented control.
+function ViewModeTabs({ mode, setMode, F }) {
+  const Tab = ({ value, label }) => {
+    const sel = mode === value;
+    return (
+      <TouchableOpacity
+        onPress={() => setMode(value)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ selected: sel }}
+        accessibilityLabel={`Show ${label}`}
+        style={{
+          flex: 1, paddingVertical: 8, borderRadius: 10,
+          backgroundColor: sel ? F.coral : F.surface,
+          borderWidth: 1, borderColor: sel ? F.coral : F.line,
+          alignItems: 'center',
+        }}>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: sel ? '#fff' : F.ink, letterSpacing: 0.5 }}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+  return (
+    <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+      <Tab value="days" label="DAYS"/>
+      <Tab value="hour" label="BY HOUR"/>
+    </View>
+  );
+}
+
+// PS-25 — 24-cell horizontal heat strip. Reads `hourOfDayHistogram(monthKey)`.
+// Below 50 timestamped expenses, renders an opt-in / keep-logging nudge
+// instead of a misleading sparse pattern.
+function HourHeatStrip({ monthKey, monthLabel, F, sym }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    hourOfDayHistogram({ monthKey })
+      .then((res) => { if (!cancelled) setData(res); })
+      .catch((e) => { logError('spendcal:hourHistogram', e); if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [monthKey]);
+
+  if (loading) {
+    return (
+      <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1, borderColor: F.line, padding: 16 }}>
+        <Text style={{ fontSize: 12, color: F.ink3 }}>Loading hour-of-day pattern…</Text>
+      </View>
+    );
+  }
+
+  if (!data || !data.ready) {
+    return (
+      <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1, borderColor: F.line,
+        padding: 22, alignItems: 'center' }}>
+        <Text style={{ fontSize: 32, marginBottom: 6 }}>🕐</Text>
+        <Text style={{ fontSize: 14, color: F.ink2, textAlign: 'center' }}>
+          Hour-of-day pattern needs 50+ timestamped expenses.
+        </Text>
+        <Text style={{ fontSize: 11, color: F.ink3, marginTop: 6, textAlign: 'center', lineHeight: 16 }}>
+          Currently {data?.sample_size ?? 0}. Enable "Capture expense time" in Profile → General to start
+          stamping new entries with their save time.
+        </Text>
+      </View>
+    );
+  }
+
+  const maxTotal = Math.max(...data.buckets.map((b) => b.total), 1);
+  const peak = data.peak_hour;
+
+  return (
+    <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1, borderColor: F.line, padding: 16 }}>
+      <Text style={{ fontSize: 12, color: F.ink3, fontWeight: '700', letterSpacing: 0.7, marginBottom: 8 }}>
+        BY HOUR · {monthLabel.toUpperCase()}
+      </Text>
+      <Text style={{ fontSize: 13, color: F.ink, marginBottom: 14 }}>
+        Peak hour: {peak != null ? `${String(peak).padStart(2, '0')}:00` : '—'}
+        <Text style={{ color: F.ink3 }}> · from {data.sample_size} timestamped spends</Text>
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 1 }}>
+        {data.buckets.map((b) => {
+          const intensity = b.total > 0 ? Math.max(0.1, b.total / maxTotal) : 0;
+          return (
+            <View key={b.hour} style={{ flex: 1, alignItems: 'center' }}>
+              <View style={{
+                width: '100%', aspectRatio: 0.5,
+                backgroundColor: intensity > 0 ? `rgba(232,131,115,${intensity})` : F.cream,
+                borderRadius: 2,
+                borderWidth: peak === b.hour ? 1.2 : 0,
+                borderColor: F.coral,
+              }}/>
+              {b.hour % 6 === 0 && (
+                <Text style={{ fontSize: 8, color: F.ink3, marginTop: 4 }}>
+                  {String(b.hour).padStart(2, '0')}
+                </Text>
+              )}
+            </View>
+          );
+        })}
+      </View>
+      {data.total > 0 && (
+        <Text style={{ fontSize: 11, color: F.ink3, marginTop: 8 }}>
+          Total {sym}{data.total.toLocaleString(undefined, { maximumFractionDigits: 0 })} across the day
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function SpendCalendar({ navigation }) {
   const { F } = useTheme();
   const { expenses, spendByDay, listByDate } = useExpenses();
@@ -314,6 +444,9 @@ function SpendCalendar({ navigation }) {
     try { await loadMonth(); } finally { setRefreshing(false); }
   }, [loadMonth]);
 
+  // PS-25 — view mode toggle. 'days' = month grid (default); 'hour' = 24-cell strip.
+  const [viewMode, setViewMode] = useState('days');
+
   // Auto-select today when viewing the current month; clear when paging away.
   const [selectedDay, setSelectedDay] = useState(null);
   useEffect(() => {
@@ -365,24 +498,33 @@ function SpendCalendar({ navigation }) {
         </View>
       </View>
 
-      <PagerStrip offset={offset} setOffset={setOffset} F={F}/>
+      {/* PS-25 — segmented control (Days / By hour). Default is Days. */}
+      <ViewModeTabs mode={viewMode} setMode={setViewMode} F={F}/>
 
-      <MonthGrid
-        year={year} monthIndex={monthIndex}
-        byDay={byDay}
-        maxTotal={maxTotal}
-        selectedDay={selectedDay}
-        setSelectedDay={setSelectedDay}
-        F={F}/>
+      {viewMode === 'days' ? (
+        <>
+          <PagerStrip offset={offset} setOffset={setOffset} F={F}/>
 
-      <SelectionCallout
-        year={year} monthIndex={monthIndex} day={selectedDay}
-        dayTotal={dayTotal}
-        dayExpenses={dayExpenses}
-        loading={dayLoading}
-        F={F} sym={sym} navigation={navigation}/>
+          <MonthGrid
+            year={year} monthIndex={monthIndex}
+            byDay={byDay}
+            maxTotal={maxTotal}
+            selectedDay={selectedDay}
+            setSelectedDay={setSelectedDay}
+            F={F}/>
 
-      {byDay.size === 0 && !refreshing && (
+          <SelectionCallout
+            year={year} monthIndex={monthIndex} day={selectedDay}
+            dayTotal={dayTotal}
+            dayExpenses={dayExpenses}
+            loading={dayLoading}
+            F={F} sym={sym} navigation={navigation}/>
+        </>
+      ) : (
+        <HourHeatStrip monthKey={monthKey} monthLabel={SUB_CAL_MONTH_NAMES[monthIndex]} F={F} sym={sym}/>
+      )}
+
+      {viewMode === 'days' && byDay.size === 0 && !refreshing && (
         <View style={{ alignItems: 'center', padding: 32, backgroundColor: F.surface,
           borderRadius: 18, borderWidth: 1, borderColor: F.line }}>
           <Text style={{ fontSize: 32, marginBottom: 6 }}>🗓️</Text>

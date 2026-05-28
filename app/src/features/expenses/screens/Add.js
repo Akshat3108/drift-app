@@ -308,6 +308,13 @@ function Add({ navigation, route }) {
       if (parseFloat(amount) === 0) return Alert.alert('Enter an amount');
       setSaving(true);
       try {
+        // PS-25 — opt-in time stamp. Only the quick-add path captures
+        // `expense_time` (Scan + EditExpense + tabular leave it NULL per
+        // Step-2 decision); skipped when the setting is OFF.
+        const now = new Date();
+        const expense_time = settings.capture_expense_time
+          ? `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+          : undefined;
         const saved = await addExpense({
           category_id: selected.id,
           merchant: merchant.trim(),
@@ -318,6 +325,7 @@ function Add({ navigation, route }) {
           recurring,
           payment_method: paymentMethod,
           tags: tagNames,
+          expense_time,
         });
         // 5.10 — every successful save reinforces the alias mapping so the
         // user's most recent choice wins the next time this merchant comes up.

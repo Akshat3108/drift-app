@@ -47,8 +47,15 @@ export function normalizeName(raw) {
   let unitFound = false;
 
   // Step 1: primary unit token, e.g. "440 ml", "1 ltr", "500 g", "2 kg".
+  // Skip when the unit token appears AFTER a "N x" prefix with a product name
+  // between them — that's a packaging spec ("1 x Coca Cola 475ml" = 1 piece,
+  // not 475 mL), not the unit count. We still strip it from the display name
+  // when the leadMul claims qty.
   const tok = parseUnitToken(s);
-  if (tok) {
+  const leadMulEarly = s.match(LEAD_MUL_RE);
+  const unitTokenIsPackagingSpec =
+    !!(tok && leadMulEarly && (tok.index - leadMulEarly[0].length) > 3);
+  if (tok && !unitTokenIsPackagingSpec) {
     qty = tok.qty;
     unit = tok.unit;
     unitFound = true;
@@ -75,6 +82,9 @@ export function normalizeName(raw) {
   if (multiplier !== 1) {
     if (unitFound) qty = qty * multiplier;
     else { qty = multiplier; unit = 'pcs'; }
+  } else if (unitTokenIsPackagingSpec && leadMul) {
+    // "1 x Coca Cola 475ml": leadMul=1, packaging-spec stays in name.
+    qty = 1; unit = 'pcs';
   }
 
   // Step 3: portion words (restaurant menus).

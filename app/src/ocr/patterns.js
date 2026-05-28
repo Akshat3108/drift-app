@@ -217,19 +217,32 @@ export const FEE_KEYWORDS = [
 
 export const DISCOUNT_KEYWORDS = [
   'discount',
-  'savings?',
-  'you\\s*saved',
   'promo\\s*(?:applied|code)?',
   'coupon\\s*(?:applied|code)?',
   'offer\\s*applied',
   'cashback',
-  '\\bsav\\b',
+  // App-wallet credits applied against the bill (Domino's, Swiggy Money,
+  // Amazon Pay balance, etc.). The leading qualifier is mandatory so we
+  // don't catch "Paid via wallet" — generic "wallet" still falls through
+  // to META_KEYWORDS.
+  '(?:domino\\\'?s|paytm|amazon\\s*pay|swiggy\\s*money|zomato|store|app|flipkart|myntra)\\s*wallet',
+  'wallet\\s*(?:credit|balance|applied|used|debit)',
   // Bare '\boff\b' was previously here. It collided with "Rounded Off Invoice
   // Amount" on Indian thermal POS receipts (Starbucks, McDonald's pre-GST),
   // misclassifying the line as a discount and stealing it from TOTAL_RE.
   // Real discount lines that just say "Rs 50 off" without a "discount" /
   // "savings" / "promo" keyword are rare enough that the precision win is
   // worth the lost coverage.
+];
+
+// Informational savings-banner rows printed alongside the itemized discount
+// (Dominos "You saved ₹67.87", Zepto "Total Savings ₹40"). Same amount as
+// the bill-section Discount line — counting both double-deducts. Treated as
+// discount only as a fallback when no explicit DISCOUNT_KEYWORDS match.
+export const SAVINGS_BANNER_KEYWORDS = [
+  'savings?',
+  'you\\s*saved',
+  '\\bsav\\b',
 ];
 
 // Metadata / non-line-item rows.
@@ -541,6 +554,7 @@ export const SUBTOTAL_RE  = unionRe(SUBTOTAL_KEYWORDS);
 export const TAX_RE       = unionRe(TAX_KEYWORDS);
 export const FEE_RE       = unionRe(FEE_KEYWORDS);
 export const DISCOUNT_RE  = unionRe(DISCOUNT_KEYWORDS);
+export const SAVINGS_BANNER_RE = unionRe(SAVINGS_BANNER_KEYWORDS);
 export const META_RE      = unionRe(META_KEYWORDS);
 export const BILL_HDR_RE  = unionRe(BILL_HEADER_KEYWORDS);
 
@@ -567,6 +581,7 @@ export const SKIP_RE = new RegExp(
     ...TAX_KEYWORDS,
     ...FEE_KEYWORDS,
     ...DISCOUNT_KEYWORDS,
+    ...SAVINGS_BANNER_KEYWORDS,
     ...META_KEYWORDS.filter(k => !COLUMN_LABEL_META_KEYWORDS.has(k)),
     ...BILL_HEADER_KEYWORDS,
   ].sort((a, b) => b.length - a.length).join('|') + ')\\b',

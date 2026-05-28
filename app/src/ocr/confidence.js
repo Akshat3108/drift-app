@@ -46,7 +46,13 @@ function reconcileTolerances(itemCount) {
 export function scoreConfidence(parsed) {
   const components = {
     currency:  parsed.currency ? 1 : 0,
-    date:      parsed.date && parsed.date !== parsed._fallbackDate ? 1 : 0.3,
+    // Prefer the explicit `_dateFound` flag set by parseReceipt; falls back
+    // to string-compare for older callers. Pure string-compare misfires when
+    // the OCR'd date happens to equal today's fallback date.
+    date:      (parsed._dateFound != null
+                  ? !!parsed._dateFound
+                  : (parsed.date && parsed.date !== parsed._fallbackDate))
+                 ? 1 : 0.3,
     merchant:  parsed.merchant && parsed.merchant !== 'Unknown store' ? 1 : 0,
     format:    typeof parsed.formatConfidence === 'number' ? parsed.formatConfidence : 0,
     items:     (parsed.items?.length || 0) > 0 ? 1 : 0,

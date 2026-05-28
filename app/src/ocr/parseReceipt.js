@@ -33,6 +33,7 @@ import {
   TAX_RE,
   FEE_RE,
   DISCOUNT_RE,
+  SAVINGS_BANNER_RE,
   META_RE,
   BILL_HDR_RE,
   SKIP_RE,
@@ -135,6 +136,7 @@ export function classifyRowWithContext(text, amounts) {
   // still catches them on the second pass.
   if (SUBTOTAL_RE.test(text)) return trailing ? 'subtotal' : 'item';
   if (DISCOUNT_RE.test(text)) return trailing ? 'discount' : 'item';
+  if (SAVINGS_BANNER_RE.test(text)) return trailing ? 'discount_banner' : 'item';
   if (TOTAL_RE.test(text))    return trailing ? 'total'    : 'item';
   if (TAX_RE.test(text))      return trailing ? 'tax'      : 'item';
   if (FEE_RE.test(text))      return trailing ? 'fee'      : 'item';
@@ -251,7 +253,7 @@ function findPriority(candidates, priority) {
 }
 
 function extractBillTotals(rows, config) {
-  const buckets = { total: [], subtotal: [], tax: [], fee: [], discount: [] };
+  const buckets = { total: [], subtotal: [], tax: [], fee: [], discount: [], discount_banner: [] };
   for (const r of rows) {
     const amounts = matchAmounts(r.text);
     if (!amounts.length) continue;
@@ -285,7 +287,11 @@ function extractBillTotals(rows, config) {
     amount: f.value,
   }));
 
-  const discounts = buckets.discount.map(d => ({
+  // Banner rows ("You saved ₹67.87", "Total Savings ₹40") repeat the
+  // bill-section discount value. Promote them only when no explicit discount
+  // line was found — otherwise dropping the banner avoids double-counting.
+  const discountSource = buckets.discount.length ? buckets.discount : buckets.discount_banner;
+  const discounts = discountSource.map(d => ({
     label: labelOf(d.text, 'Discount'),
     amount: d.value,
   }));
@@ -1309,7 +1315,8 @@ export async function parseReceipt(ocrResultOrLines, options = {}) {
   // ── Merchant / currency / date / GSTIN / order id ────────────────────
   const merchant = extractMerchant(rows, fd.brand, minY, rangeY, fd.format);
   const currency = detectCurrency(fullText);
-  const date = findDate(fullText) || fallbackDate;
+  const foundDate = findDate(fullText);
+  const date = foundDate || fallbackDate;
   const gstin = extractGstin(fullText);
   const orderId = extractOrderId(fullText);
   const invoiceNumber = extractInvoiceNumber(fullText);
@@ -1389,6 +1396,7 @@ export async function parseReceipt(ocrResultOrLines, options = {}) {
     merchant,
     date,
     _fallbackDate: fallbackDate,
+    _dateFound: !!foundDate,
     total: +total.toFixed(2),
     subtotal: +subtotal.toFixed(2),
     tax: +tax.toFixed(2),

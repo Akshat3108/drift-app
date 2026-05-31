@@ -13,7 +13,7 @@ import { UNIT_OPTIONS } from '@core/domain/units';
 import { PRODUCE } from '@core/domain/produce';
 import { normalizeName } from '@core/domain/normalize';
 import { useToast } from '@components/Toast';
-import { writeCandidate as writeGoldenCandidate } from '@ocr/golden/capture';
+import { writeCandidate as writeGoldenCandidate, reportBadScan } from '@ocr/golden/capture';
 import { templates as receiptTemplates } from '@features/scan/templates.repo';
 
 function Scan({ navigation, route }) {
@@ -577,6 +577,25 @@ function Scan({ navigation, route }) {
     setAddingPage(false);
   };
 
+  // Flag the current scan as misread and stash it (raw OCR + the parser's
+  // output) for later export via Profile → "Export captured scans". Bypasses
+  // the auto-capture heuristic/toggle and does NOT require saving the expense —
+  // the whole point is wrong reads you don't want to keep. captureRef holds the
+  // OCR JSON the parser ate + the review payload it produced.
+  const reportWrongScan = async () => {
+    const cap = captureRef.current;
+    if (!cap?.ocr || !cap?.processed) {
+      toast('Nothing to report yet');
+      return;
+    }
+    try {
+      const path = await reportBadScan({ ocr: cap.ocr, processed: cap.processed });
+      toast(path ? 'Saved for review · export from Profile' : 'Could not save report');
+    } catch {
+      toast('Could not save report');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: F.bg }}>
       <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 20, paddingBottom: 12 }}>
@@ -870,6 +889,17 @@ function Scan({ navigation, route }) {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Diagnostic: flag a misread scan for later export (Profile → Export
+              captured scans). Independent of saving the expense. */}
+          <TouchableOpacity onPress={reportWrongScan} activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Report this scan as read wrong"
+            style={{ marginTop: 12, paddingVertical: 8, alignItems: 'center' }}>
+            <Text style={{ color: F.ink3, fontSize: 12, textDecorationLine: 'underline' }}>
+              ⚠ Read wrong? Save this scan for review
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       )}
 

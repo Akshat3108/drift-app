@@ -135,8 +135,10 @@ export async function setEnabled(enabled) {
 // Selection logic: capture when score >= MIN_SCORE_TO_CAPTURE OR the user
 // edited any field. Editing is the strongest signal because it tells us
 // explicitly where the parser was wrong.
-export async function writeCandidate({ ocr, processed, saved }) {
-  if (!(await getEnabled())) return null;
+export async function writeCandidate({ ocr, processed, saved, force = false, note = null }) {
+  // A user-forced report bypasses BOTH the auto-capture toggle and the score
+  // gate — when the user explicitly says "this was read wrong", always keep it.
+  if (!force && !(await getEnabled())) return null;
   await ensureDir();
 
   const assess = assessForCapture(processed);
@@ -145,7 +147,11 @@ export async function writeCandidate({ ocr, processed, saved }) {
     assess.score += 3;
     assess.reasons.push(...editDelta.fields.map(f => `edited:${f}`));
   }
-  if (assess.score < MIN_SCORE_TO_CAPTURE && !editDelta.edited) return null;
+  if (force) {
+    assess.score += 5;
+    assess.reasons.push('user-reported');
+  }
+  if (!force && assess.score < MIN_SCORE_TO_CAPTURE && !editDelta.edited) return null;
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const path = `${BASE_DIR}${ts}.json`;
@@ -156,6 +162,8 @@ export async function writeCandidate({ ocr, processed, saved }) {
     reasons: assess.reasons,
     edited: editDelta.edited,
     editedFields: editDelta.fields,
+    userReported: !!force,
+    note: note || null,
     ocr,
     parsed: {
       merchant: processed.merchant,
@@ -190,6 +198,18 @@ export async function writeCandidate({ ocr, processed, saved }) {
   } catch {
     return null;
   }
+}
+
+// Explicit user-reported bad scan. Bypasses the auto-capture gate AND the
+// enabled toggle — when the user taps "Report wrong scan" we always keep it,
+// tagged `userReported` so the export bundle (and the human/Claude reviewing
+// it) can prioritise these over heuristically-captured candidates. `saved` is
+// null on purpose: a misread receipt is usually reported before/without being
+// saved as an expense. Returns the candidate path, or null if the write failed
+// (e.g. no OCR captured yet).
+export function reportBadScan({ ocr, processed, note = null }) {
+  if (!ocr || !processed) return Promise.resolve(null);
+  return writeCandidate({ ocr, processed, saved: null, force: true, note });
 }
 
 // Prune the oldest unedited candidate when we exceed the cap. Edited

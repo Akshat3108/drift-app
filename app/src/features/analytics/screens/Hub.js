@@ -17,6 +17,7 @@ import {
   spendingVelocity, inflationBasket, lifestyleInflation,
   subscriptionLeakage, reorderQueue,
 } from '../../../analytics';
+import { expenses as expRepo } from '@features/expenses/repo';
 
 function Card({ title, emoji, body, sub, accent, F, onPress, dim }) {
   return (
@@ -66,17 +67,21 @@ function Hub({ navigation }) {
   const [lifestyle, setLifestyle] = useState(null);
   const [leakage, setLeakage]     = useState(null);
   const [reorder, setReorder]     = useState(null);
+  // PS-38 — count of scans flagged for review (low confidence / no items).
+  const [reviewCount, setReviewCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const [v, i, l, s, r] = await Promise.all([
+    const [v, i, l, s, r, rc] = await Promise.all([
       spendingVelocity().catch(() => null),
       inflationBasket().catch(() => null),
       lifestyleInflation().catch(() => null),
       subscriptionLeakage().catch(() => null),
       reorderQueue().catch(() => null),
+      expRepo.reviewQueueCount().catch(() => 0),
     ]);
     setVelocity(v); setInflation(i); setLifestyle(l); setLeakage(s); setReorder(r);
+    setReviewCount(rc || 0);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -200,6 +205,14 @@ function Hub({ navigation }) {
             F={{ ...F, line: 'transparent' }}
             onPress={() => navigation.navigate('Trends')}/>
         </View>
+        {/* PS-38 — scans needing a human check. Shown only when the queue is
+            non-empty; sits near the top because it's an actionable cleanup. */}
+        {reviewCount > 0 && (
+          <ReportRow icon="🔍"
+            title={`${reviewCount} scan${reviewCount === 1 ? '' : 's'} need review`}
+            sub="Low-confidence or empty-item receipts"
+            F={F} onPress={() => navigation.navigate('ReviewQueue')}/>
+        )}
         {/* PS-24 — Year-in-Review. Gated until Oct so it appears once the
             calendar year has enough data to feel like a retrospective. */}
         {new Date().getMonth() >= 9 && (

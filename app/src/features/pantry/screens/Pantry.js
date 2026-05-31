@@ -9,9 +9,11 @@
 
 import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@core/theme/ThemeContext';
 import { usePantry } from '@features/pantry/context';
+import { items as itemRepo } from '@features/items/repo';
 import SwipeableRow from '@components/SwipeableRow';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
@@ -116,6 +118,13 @@ function Pantry({ navigation }) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState('inventory');
 
+  // PS-39 — items still inside their return window. Fetched on focus so a
+  // freshly-scanned receipt's returnable items show up without a manual reload.
+  const [returnable, setReturnable] = useState([]);
+  useFocusEffect(useCallback(() => {
+    itemRepo.returnableItems({ limit: 50 }).then(setReturnable).catch(() => setReturnable([]));
+  }, []));
+
   const list = useMemo(() => (tab === 'inventory' ? items : lowStock), [tab, items, lowStock]);
 
   const handleDelete = useCallback(async (row) => {
@@ -170,6 +179,45 @@ function Pantry({ navigation }) {
         <Text style={{ fontSize: 13, color: F.ink2, marginBottom: 20 }}>
           <Text style={{ color: F.coral }}>{lowStock.length} running low</Text>
         </Text>
+
+        {/* PS-39 — items still returnable today. Tap a row → the originating
+            spend. Sorted soonest-to-close; closing today/tomorrow flagged. */}
+        {returnable.length > 0 && (
+          <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
+            borderColor: F.sageD, marginBottom: 16, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8,
+              paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 }}>
+              <Text style={{ fontSize: 16 }}>↩</Text>
+              <Text style={{ fontSize: 13, color: F.ink, fontWeight: '700' }}>
+                Returnable now · {returnable.length}
+              </Text>
+            </View>
+            {returnable.map((r, i) => {
+              const soon = r.days_left <= 1;
+              const leftLabel = r.days_left <= 0 ? 'closes today'
+                : r.days_left === 1 ? 'closes tomorrow'
+                : `${r.days_left}d left`;
+              return (
+                <TouchableOpacity key={r.id}
+                  onPress={() => navigation.navigate('Detail', { id: r.expense_id })}
+                  activeOpacity={0.7}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
+                    paddingHorizontal: 14, paddingVertical: 11,
+                    borderTopWidth: i ? 1 : 0, borderTopColor: F.line }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, color: F.ink, fontWeight: '500',
+                      textTransform: 'capitalize' }} numberOfLines={1}>{r.name}</Text>
+                    <Text style={{ fontSize: 11, color: F.ink3, marginTop: 1 }} numberOfLines={1}>
+                      {r.merchant} · by {r.return_by_date}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, fontWeight: '700',
+                    color: soon ? F.coral : F.ink2 }}>{leftLabel}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         {/* Tab segmented control */}
         <View style={{ flexDirection: 'row', backgroundColor: F.surface, borderRadius: 14,

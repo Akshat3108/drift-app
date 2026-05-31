@@ -215,8 +215,8 @@ export const items = {
              (expense_id, name, normalized_name, kind, qty, unit,
               canonical_qty, canonical_unit, unit_price, price, purchase_date,
               hsn, cgst_rate, sgst_rate, igst_rate,
-              batch_no, expiry_date, mfg_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              batch_no, expiry_date, mfg_date, return_by_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             expenseId,
             it.name,
@@ -236,6 +236,8 @@ export const items = {
             it.batch_no ?? null,
             it.expiry_date ?? null,
             it.mfg_date ?? null,
+            // PS-39 — preserve the return-window deadline across edits.
+            it.return_by_date ?? null,
           ]
         );
       }
@@ -273,6 +275,30 @@ export const items = {
         ORDER BY r.purchase_date DESC, r.expense_id DESC, r.id
         LIMIT ?`,
       [...params, limit]
+    );
+  },
+
+  // PS-39 — items still inside their return window today. Powers the Pantry
+  // "Returnable now" card + the return-window reminder. Excludes refund rows
+  // (e.refund_of_expense_id IS NOT NULL) and soft-deleted items/parents.
+  // `days_left` is the whole-day countdown to the window close (0 = closes
+  // today). Soonest-to-close first.
+  async returnableItems({ limit = 50 } = {}) {
+    return all(
+      `SELECT r.id, r.expense_id, r.name, r.normalized_name, r.qty, r.unit,
+              r.price, r.purchase_date, r.return_by_date,
+              e.merchant, e.expense_date,
+              CAST(julianday(date(r.return_by_date)) - julianday(date('now')) AS INTEGER) AS days_left
+         FROM receipt_items r
+         JOIN expenses e ON e.id = r.expense_id
+        WHERE ${NOT_DELETED_R}
+          AND e.deleted_at IS NULL
+          AND e.refund_of_expense_id IS NULL
+          AND r.return_by_date IS NOT NULL
+          AND date('now') BETWEEN date(r.purchase_date) AND date(r.return_by_date)
+        ORDER BY r.return_by_date ASC, r.id ASC
+        LIMIT ?`,
+      [limit]
     );
   },
 };

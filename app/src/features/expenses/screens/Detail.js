@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, Image } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../../../hooks/useAppState';
 import { useItemActions } from '@features/items/context';
 import { PAYMENT_LABELS } from '@features/expenses/filters';
@@ -9,6 +10,7 @@ import SwipeableRow from '@components/SwipeableRow';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
 import { categoryAnomalyStats, classifyExpenseAnomaly } from '../../../analytics';
+import { expenses as expRepo } from '@features/expenses/repo';
 
 const MOOD_LABELS = { '😍': 'Loved it', '😌': 'Worth it', '😐': 'Neutral', '😬': 'Unsure', '😞': 'Regret' };
 
@@ -63,6 +65,10 @@ function Detail({ route, navigation }) {
   const { id } = route.params;
   const e = expenses.find(x => x.id === id);
   const [items, setItems] = useState([]);
+  // PS-37 — refunds that point at THIS expense (→ "Refunded on …" badge), and,
+  // when this row is itself a refund, the original it credits (→ back-link).
+  const [refunds, setRefunds] = useState([]);
+  const [refundOrigin, setRefundOrigin] = useState(null);
 
   // 5.13 — receipt viewer modal + 5.15 — shadow the row's receipt fields so a
   // successful lazy-migrate refreshes the thumb without a full provider hop.
@@ -77,6 +83,20 @@ function Detail({ route, navigation }) {
       listByExpense(e.id).then(setItems).catch(() => setItems([]));
     }
   }, [e?.id, listByExpense]);
+
+  // PS-37 — load refund linkage. refundsFor(id) drives the "Refunded" badge;
+  // when this row is a refund itself, fetch the original for the back-link.
+  // On focus (not just mount) so the badge appears after returning from the
+  // refund-entry modal without a remount.
+  useFocusEffect(useCallback(() => {
+    if (!e?.id) return;
+    expRepo.refundsFor(e.id).then(setRefunds).catch(() => setRefunds([]));
+    if (e.refund_of_expense_id != null) {
+      expRepo.get(e.refund_of_expense_id).then(setRefundOrigin).catch(() => setRefundOrigin(null));
+    } else {
+      setRefundOrigin(null);
+    }
+  }, [e?.id, e?.refund_of_expense_id]));
 
   // 8.13 — Per-category anomaly flag. Load cached stats once per category +
   // amount; null result hides the banner entirely.
@@ -102,6 +122,12 @@ function Detail({ route, navigation }) {
 
   const similar = expenses.filter(x => x.category_id === e.category_id && x.id !== e.id).slice(0, 3);
   const taxRows = buildTaxRows(e, sym);
+
+  // PS-37 — refund derivations.
+  const isRefundRow = e.refund_of_expense_id != null;
+  const refundedTotal = refunds.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+  const latestRefundDate = refunds[0]?.expense_date || null;
+  const canRefund = !isRefundRow && Number(e.amount) > 0;
 
   const handleDelete = async () => {
     const merchant = e.merchant;
@@ -131,8 +157,8 @@ function Detail({ route, navigation }) {
       <View style={{ backgroundColor: F.cream, borderRadius: 26, padding: 24,
         alignItems: 'center', marginTop: 16, marginBottom: 16 }}>
         <Text style={{ fontSize: 52 }}>{e.category_emoji || '💰'}</Text>
-        <Text style={{ fontSize: 48, color: F.ink, fontWeight: '400', marginTop: 8 }}>
-          {sym}{e.amount.toFixed(2)}
+        <Text style={{ fontSize: 48, color: e.amount < 0 ? F.sageD : F.ink, fontWeight: '400', marginTop: 8 }}>
+          {e.amount < 0 ? '−' : ''}{sym}{Math.abs(e.amount).toFixed(2)}
         </Text>
         {e.merchant_id ? (
           <TouchableOpacity onPress={() => navigation.navigate('MerchantDetail', {
@@ -149,6 +175,47 @@ function Detail({ route, navigation }) {
           {e.expense_date} · {e.category_name || 'Uncategorised'}
         </Text>
       </View>
+
+      {/* PS-37 — this row is a refund: link back to the original spend. */}
+      {isRefundRow && (
+        <TouchableOpacity
+          activeOpacity={refundOrigin ? 0.7 : 1}
+          onPress={() => refundOrigin && navigation.replace('Detail', { id: refundOrigin.id })}
+          style={{ backgroundColor: F.mint, borderRadius: 18, padding: 14, marginBottom: 12,
+            borderWidth: 1, borderColor: F.sageD, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Text style={{ fontSize: 20 }}>↩</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600' }}>
+              Refund of {refundOrigin?.merchant || e.merchant}
+            </Text>
+            {refundOrigin && (
+              <Text style={{ fontSize: 12, color: F.ink2, marginTop: 2 }}>
+                Original: {sym}{Math.abs(Number(refundOrigin.amount)).toFixed(2)} on {refundOrigin.expense_date}
+              </Text>
+            )}
+          </View>
+          {refundOrigin && <Text style={{ fontSize: 18, color: F.ink2 }}>›</Text>}
+        </TouchableOpacity>
+      )}
+
+      {/* PS-37 — this spend has been (partially) refunded. */}
+      {!isRefundRow && refunds.length > 0 && (
+        <View style={{ backgroundColor: F.surface, borderRadius: 18, padding: 14, marginBottom: 12,
+          borderWidth: 1, borderColor: F.sageD, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: F.mint,
+            alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 18 }}>↩</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600' }}>
+              Refunded {sym}{refundedTotal.toFixed(2)}
+            </Text>
+            <Text style={{ fontSize: 12, color: F.ink2, marginTop: 2 }}>
+              {refunds.length === 1 ? `on ${latestRefundDate}` : `${refunds.length} refunds · latest ${latestRefundDate}`}
+            </Text>
+          </View>
+        </View>
+      )}
 
       {anomaly && (
         <View style={{
@@ -347,6 +414,23 @@ function Detail({ route, navigation }) {
             ))}
           </View>
         </View>
+      )}
+
+      {/* PS-37 — log a refund/return of this spend. Prefills Add's refund mode
+          with the original merchant/category/amount; the saved row is negative
+          and linked back here. Hidden once already refunded or on a refund row. */}
+      {canRefund && refunds.length === 0 && (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Add', {
+            refundOfExpenseId: e.id,
+            prefillAmount: e.amount,
+            prefillMerchant: e.merchant,
+            prefillCategoryId: e.category_id,
+          })}
+          style={{ padding: 14, borderRadius: 12, marginBottom: 10,
+            backgroundColor: F.mint, borderWidth: 1, borderColor: F.sageD, alignItems: 'center' }}>
+          <Text style={{ color: F.sageD, fontWeight: '600' }}>↩ Mark as refunded</Text>
+        </TouchableOpacity>
       )}
 
       <View style={{ flexDirection: 'row', gap: 10 }}>

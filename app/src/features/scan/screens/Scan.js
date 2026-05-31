@@ -15,6 +15,7 @@ import { normalizeName } from '@core/domain/normalize';
 import { useToast } from '@components/Toast';
 import { writeCandidate as writeGoldenCandidate, reportBadScan } from '@ocr/golden/capture';
 import { templates as receiptTemplates } from '@features/scan/templates.repo';
+import { returnByDateFor } from '@features/scan/returnPolicy';
 
 function Scan({ navigation, route }) {
   const { F, sym, pots, addExpenseWithItems } = useApp();
@@ -390,9 +391,19 @@ function Scan({ navigation, route }) {
   // match exactly.
   const buildSavePayload = () => {
     const validItems = items.filter(it => it.name?.trim() && it.price > 0);
+    const dateStr = date || new Date().toISOString().slice(0, 10);
+    // PS-39 — stamp a default return-by date from the merchant policy map.
+    // One window per receipt (per-item manual edit is a later follow-up);
+    // any item already carrying its own date is left untouched.
+    const returnBy = returnByDateFor(merchant.trim(), dateStr);
+    const itemsForSave = returnBy
+      ? validItems.map((it) => ({ ...it, return_by_date: it.return_by_date ?? returnBy }))
+      : validItems;
+    // parsedShape keeps the un-stamped items so the dedup fingerprint stays
+    // stable regardless of the return-window stamp.
     const parsedShape = {
       merchant: merchant.trim(),
-      date: date || new Date().toISOString().slice(0, 10),
+      date: dateStr,
       total,
       items: validItems,
     };
@@ -411,9 +422,13 @@ function Scan({ navigation, route }) {
       receipt_uri: image,
       receipt_hash: fingerprintReceipt(parsedShape),
       receipt_soft_hash: softFingerprint(parsedShape),
+      // PS-38 — persist the parser's overall 0..1 score so low-confidence
+      // scans surface in the review queue. `confidence` holds the scoreConfidence
+      // result for the active parse (re-set on each scan/merge).
+      ocr_confidence: confidence?.overall ?? null,
       ...(taxInvoice || {}),
     };
-    return { expense, items: validItems, parsedShape };
+    return { expense, items: itemsForSave, parsedShape };
   };
 
   const performSave = async ({ expense, items: validItems }) => {

@@ -37,6 +37,7 @@ const LINKING = {
 
 import HomeScreen        from '@features/home/screens/Home';
 import ScanScreen        from '@features/scan/screens/Scan';
+import ReviewQueueScreen from '@features/scan/screens/ReviewQueue';
 import TrendsScreen      from '@features/trends/screens/Trends';
 import SubsScreen        from '@features/subs/screens/Subs';
 import AddScreen         from '@features/expenses/screens/Add';
@@ -114,6 +115,7 @@ import { withBoundary } from '../components/ErrorBoundary';
 
 const Home        = withBoundary('Home',        HomeScreen);
 const Scan        = withBoundary('Scan',        ScanScreen);
+const ReviewQueue = withBoundary('ReviewQueue', ReviewQueueScreen);
 const Trends      = withBoundary('Trends',      TrendsScreen);
 const Subs        = withBoundary('Subs',        SubsScreen);
 const Add         = withBoundary('Add',         AddScreen);
@@ -243,6 +245,8 @@ export default function Navigation() {
         <Stack.Screen name="AllExpenses" component={AllExpenses} options={{ title: 'All transactions' }}/>
         <Stack.Screen name="Search"      component={Search}      options={{ presentation: 'modal', headerShown: false }}/>
         <Stack.Screen name="Merchants"   component={Merchants}   options={{ title: 'Top merchants' }}/>
+        {/* PS-38 — OCR review queue. */}
+        <Stack.Screen name="ReviewQueue" component={ReviewQueue} options={{ title: 'Scans to review' }}/>
         <Stack.Screen name="MerchantDetail" component={MerchantDetail} options={({ route }) => ({
           title: route.params?.displayName || 'Merchant',
         })}/>

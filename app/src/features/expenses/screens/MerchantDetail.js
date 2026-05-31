@@ -111,6 +111,19 @@ function MerchantDetail({ route, navigation }) {
                 </Text> on average
               </Text>
             )}
+            {/* PS-37 — refund rate: share of purchases at this merchant that got
+                returned. Denominator excludes the refund rows themselves. */}
+            {Number(summary.refund_txn) > 0 && (() => {
+              const refunds = Number(summary.refund_txn);
+              const purchases = Math.max(1, Number(summary.txn_count_all) - refunds);
+              const rate = Math.round((refunds / purchases) * 100);
+              return (
+                <Text style={{ fontSize: 12, color: F.ink2, marginTop: 4 }}>
+                  Refund rate: <Text style={{ color: F.coral, fontWeight: '700' }}>{rate}%</Text>
+                  {' '}({refunds} of {purchases})
+                </Text>
+              );
+            })()}
           </>
         ) : (
           <Text style={{ fontSize: 13, color: F.ink2, marginTop: 6 }}>Loading…</Text>

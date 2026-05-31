@@ -10,6 +10,24 @@ import { pantryRepo } from '@features/pantry/repo';
 // a YYYY-MM string; the criteria.dateRange.preset machinery covers calendar
 // presets, but a bare month_key is the simpler representation for the legacy
 // call site.
+// PS-38 — shared predicate for the OCR review queue. A scanned expense lands
+// here when EITHER the parser's overall confidence came in below 0.6, OR the
+// row has a receipt attached but zero live items (a scan that saved without
+// any extracted line items). Manual expenses (no receipt, NULL confidence)
+// never match — `NULL < 0.6` is NULL/false and the empty-items clause requires
+// a receipt. Legacy scans (pre-v53, no stored confidence) surface only via the
+// empty-items clause. Defined once so reviewQueue() and reviewQueueCount()
+// can't drift. Both callers alias the expenses table as `e`.
+const REVIEW_QUEUE_WHERE = `${NOT_DELETED_E}
+  AND (
+    e.ocr_confidence < 0.6
+    OR (
+      (e.receipt_path IS NOT NULL OR e.receipt_uri IS NOT NULL)
+      AND (SELECT COUNT(*) FROM receipt_items ri
+             WHERE ri.expense_id = e.id AND ri.deleted_at IS NULL) = 0
+    )
+  )`;
+
 function legacyArgsToCriteria(legacy) {
   if (!legacy) return null;
   const out = {};
@@ -84,7 +102,7 @@ export const expenses = {
     );
   },
 
-  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time }) {
+  async create({ category_id, merchant, amount, mood, carbon = 0, recurring = false, notes, receipt_uri, expense_date, payment_method, merchant_id, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time, refund_of_expense_id }) {
     // 5.9 — manual Add path now resolves the merchant text to merchants.id so
     // MerchantDetail + topMerchants can include quick-spend rows. Caller may
     // pass an explicit `merchant_id` (autocomplete picked a known merchant);
@@ -95,8 +113,8 @@ export const expenses = {
       ? merchant_id
       : await merchants.resolve(merchant);
     const res = await exec(
-      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?)`,
+      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date, payment_method, emi_loan_id, insurance_policy_id, fastag_account_id, expense_time, refund_of_expense_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?)`,
       [
         category_id ?? null,
         merchant,
@@ -113,6 +131,10 @@ export const expenses = {
         insurance_policy_id ?? null,
         fastag_account_id ?? null,
         expense_time ?? null,
+        // PS-37 — when set, this row is a refund/return of another expense.
+        // Stored with a NEGATIVE amount by the caller (Add's refund mode) so
+        // monthly_summary nets it out automatically.
+        refund_of_expense_id ?? null,
       ]
     );
     return this.get(res.lastInsertRowId);
@@ -359,8 +381,9 @@ export const expenses = {
         `INSERT INTO expenses (category_id, merchant, merchant_id, amount, mood, carbon, recurring, notes, receipt_uri, expense_date,
                                gstin, invoice_number, cgst, sgst, igst,
                                receipt_hash, receipt_soft_hash, payment_method,
-                               receipt_path, receipt_thumb, receipt_bytes, receipt_image_hash, emi_loan_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               receipt_path, receipt_thumb, receipt_bytes, receipt_image_hash, emi_loan_id,
+                               ocr_confidence)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           expense.category_id ?? null,
           expense.merchant,
@@ -385,6 +408,10 @@ export const expenses = {
           expense.receipt_bytes ?? null,
           expense.receipt_image_hash ?? null,
           expense.emi_loan_id ?? null,
+          // PS-38 — overall OCR confidence (0..1) from ScanService. NULL on
+          // manual saves; populated only on the scan path so the review queue
+          // can surface low-confidence extractions.
+          expense.ocr_confidence ?? null,
         ]
       );
       createdId = res.lastInsertRowId;
@@ -395,8 +422,8 @@ export const expenses = {
              (expense_id, name, normalized_name, kind, qty, unit,
               canonical_qty, canonical_unit, unit_price, price, purchase_date,
               hsn, cgst_rate, sgst_rate, igst_rate,
-              batch_no, expiry_date, mfg_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              batch_no, expiry_date, mfg_date, return_by_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             createdId,
             it.name,
@@ -416,6 +443,8 @@ export const expenses = {
             it.batch_no ?? null,
             it.expiry_date ?? null,
             it.mfg_date ?? null,
+            // PS-39 — return-window deadline stamped from the merchant policy.
+            it.return_by_date ?? null,
           ]
         );
       }
@@ -532,6 +561,8 @@ export const expenses = {
                                 THEN e.amount ELSE 0 END), 0) AS total_window,
               COUNT(e.id)                        AS txn_count_all,
               COALESCE(AVG(e.amount), 0)         AS avg_amount,
+              -- PS-37 — how many of this merchant's spends are refund rows.
+              COALESCE(SUM(CASE WHEN e.refund_of_expense_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS refund_txn,
               MIN(e.expense_date)                AS first_seen,
               MAX(e.expense_date)                AS last_seen
          FROM merchants m
@@ -667,6 +698,48 @@ export const expenses = {
         LIMIT 1`,
       [merchantId]
     );
+  },
+
+  // PS-37 — refunds linked to a given expense. Powers Detail's "Refunded on …"
+  // badge (this expense was refunded) and lets the original surface its return
+  // events. Live rows only; ordered newest-first.
+  async refundsFor(expenseId) {
+    if (expenseId == null) return [];
+    return all(
+      `SELECT id, merchant, amount, expense_date
+         FROM expenses
+        WHERE refund_of_expense_id = ? AND ${NOT_DELETED}
+        ORDER BY expense_date DESC, id DESC`,
+      [expenseId]
+    );
+  },
+
+  // PS-38 — OCR review queue. Returns the flagged scans newest-worst-first:
+  // lowest confidence first (NULL scores sorted last via the `IS NULL` key, so
+  // we don't depend on SQLite's NULLS LAST syntax), then most recent. The
+  // joined category columns + item_count let ReviewQueue render each row inline.
+  async reviewQueue({ limit = 100 } = {}) {
+    return all(
+      `SELECT e.*, c.name AS category_name, c.emoji AS category_emoji,
+              c.color AS category_color,
+              (SELECT COUNT(*) FROM receipt_items ri
+                 WHERE ri.expense_id = e.id AND ri.deleted_at IS NULL) AS item_count
+         FROM expenses e
+         LEFT JOIN categories c ON c.id = e.category_id
+        WHERE ${REVIEW_QUEUE_WHERE}
+        ORDER BY (e.ocr_confidence IS NULL), e.ocr_confidence ASC,
+                 e.expense_date DESC, e.id DESC
+        LIMIT ?`,
+      [limit]
+    );
+  },
+
+  // PS-38 — count for the Hub "N scans need review" report row + badge gating.
+  async reviewQueueCount() {
+    const row = await one(
+      `SELECT COUNT(*) AS n FROM expenses e WHERE ${REVIEW_QUEUE_WHERE}`
+    );
+    return row?.n ?? 0;
   },
 
   // PS-23 — delegates to the canonical streak tracker in

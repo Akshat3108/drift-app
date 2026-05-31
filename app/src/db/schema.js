@@ -1568,6 +1568,36 @@ const V52_SQL = `
 ALTER TABLE settings ADD COLUMN chart_prefs TEXT NOT NULL DEFAULT '{}';
 `;
 
+// v53 — post_187_supplement_v2 Wave-2 "lifecycle" batch (PS-37/38/39). Three
+// additive ALTERs across two tables + three partial indexes. Pure ADD COLUMN /
+// CREATE INDEX — no rebuild, matching the additive discipline of v2..v52.
+//   PS-37 — `expenses.refund_of_expense_id` self-referential FK
+//           (ON DELETE SET NULL, same column-level FK form v46/v48 used for
+//           insurance_policy_id / fastag_account_id). A refund is stored as a
+//           NEGATIVE-amount expense pointing back at the original; the existing
+//           monthly_summary triggers already net negatives, so no rollup change.
+//   PS-38 — `expenses.ocr_confidence` (0..1 overall score) stamped by
+//           ScanService on save. NULL on manual/legacy rows — the review queue
+//           treats NULL-with-receipt-but-no-items as a separate flag so old
+//           scans (pre-v53, no stored confidence) still surface when empty.
+//   PS-39 — `receipt_items.return_by_date` (YYYY-MM-DD) stamped from the
+//           bundled merchant→return-policy map at scan time.
+// The partial indexes keep these sparse columns cheap: only the (few) rows that
+// set a value are indexed, so the "review queue" / "refunded?" / "returnable
+// now" lookups stay O(matches) rather than full scans on 100k-row tables.
+const V53_SQL = `
+ALTER TABLE expenses ADD COLUMN refund_of_expense_id INTEGER
+  REFERENCES expenses(id) ON DELETE SET NULL;
+ALTER TABLE expenses ADD COLUMN ocr_confidence REAL NULL;
+ALTER TABLE receipt_items ADD COLUMN return_by_date TEXT NULL;
+CREATE INDEX IF NOT EXISTS idx_exp_refund_of
+  ON expenses(refund_of_expense_id) WHERE refund_of_expense_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_exp_ocr_conf
+  ON expenses(ocr_confidence) WHERE ocr_confidence IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_return_by
+  ON receipt_items(return_by_date) WHERE return_by_date IS NOT NULL;
+`;
+
 // v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
 // vehicle, identified by the tag_id printed on the sticker). `current_balance`
 // is the last-known wallet balance from a recharge / CSV import / manual
@@ -1913,6 +1943,11 @@ export const migrations = [
     version: 52,
     name: 'chart-prefs',
     up: async (db) => { await db.execAsync(V52_SQL); },
+  },
+  {
+    version: 53,
+    name: 'lifecycle-refund-ocr-returns',
+    up: async (db) => { await db.execAsync(V53_SQL); },
   },
 ];
 

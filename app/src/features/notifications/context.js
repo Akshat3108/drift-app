@@ -7,7 +7,9 @@ import {
   evaluatePantryLowStock,
   evaluateHoldingsNavReminder,
   evaluateInsuranceRenewals,
+  evaluateReturnWindows,
 } from './checkers';
+import { items as itemRepo } from '@features/items/repo';
 import {
   ensureForegroundHandler,
   getPermissionStatus,
@@ -232,6 +234,26 @@ export function NotificationsProvider({ children }) {
     await refreshUnread();
   }, [refreshUnread]);
 
+  // PS-39 — Return-window reminders. Fetches the still-returnable items and
+  // schedules a 09:00 reminder the day before each window closes. Runs on
+  // boot, when notifications are toggled on, and on every expense change (a
+  // fresh scan adds returnable items). The notification_log dedupe gate keeps
+  // re-runs idempotent, so calling this on EXPENSE_CHANGED is cheap.
+  const evaluateReturns = useCallback(async () => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    let returnable = [];
+    try { returnable = await itemRepo.returnableItems({ limit: 200 }); }
+    catch { return; }
+    const plan = evaluateReturnWindows({
+      items: returnable,
+      settings: settingsRef.current,
+    });
+    if (plan.length) {
+      await applyPlan(plan);
+      await refreshUnread();
+    }
+  }, [refreshUnread]);
+
   const rescheduleAllSubs = useCallback(async () => {
     if (!settingsRef.current?.notifications_enabled) return;
     const plan = evaluateSubsDue({
@@ -282,6 +304,7 @@ export function NotificationsProvider({ children }) {
           evaluatePantry(),
           evaluateHoldings(),
           rescheduleAllInsurance(),
+          evaluateReturns(),
         ]);
       }
       if (!cancelled) setReady(true);
@@ -298,10 +321,10 @@ export function NotificationsProvider({ children }) {
   useEffect(() => {
     const now = settings?.notifications_enabled ? 1 : 0;
     if (now && !prevEnabled.current) {
-      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance()]).catch(() => {});
+      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance(), evaluateReturns()]).catch(() => {});
     }
     prevEnabled.current = now;
-  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance]);
+  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance, evaluateReturns]);
 
   // NotifyBus listeners — wired here, fired from ExpensesProvider /
   // SubsProvider after their own state has settled.
@@ -314,7 +337,10 @@ export function NotificationsProvider({ children }) {
     // refresh has landed (the PantryProvider refresh listener races this
     // emit so we'd evaluate stale data without the second NOTIFY hook).
     evaluatePantry();
-  }, [evaluateBudgets, evaluatePantry]));
+    // PS-39 — a fresh scan may have stamped new return-window dates; schedule
+    // their reminders. Idempotent via the notification_log dedupe gate.
+    evaluateReturns();
+  }, [evaluateBudgets, evaluatePantry, evaluateReturns]));
 
   useNotifyBusListener(NOTIFY_EVENTS.PANTRY_CHANGED, useCallback(() => {
     evaluatePantry();

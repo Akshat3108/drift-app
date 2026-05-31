@@ -189,10 +189,10 @@ export const fillupsRepo = {
             notes, receipt_uri, expense_date, payment_method,
             gstin, invoice_number, cgst, sgst, igst,
             receipt_hash, receipt_soft_hash,
-            receipt_path, receipt_thumb, receipt_bytes)
+            receipt_path, receipt_thumb, receipt_bytes, ocr_confidence)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?,
                  ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?)`,
+                 ?, ?, ?, ?, ?, ?)`,
         [
           expense.category_id ?? null,
           expense.merchant,
@@ -215,6 +215,9 @@ export const fillupsRepo = {
           expense.receipt_path ?? null,
           expense.receipt_thumb ?? null,
           expense.receipt_bytes ?? null,
+          // PS-38 — fuel receipts are scans too; carry the OCR confidence so a
+          // low-confidence fuel slip can surface in the review queue.
+          expense.ocr_confidence ?? null,
         ]
       );
       createdExpenseId = expRes.lastInsertRowId;

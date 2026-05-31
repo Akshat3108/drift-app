@@ -47,6 +47,13 @@ function Add({ navigation, route }) {
   // don't fight the user's edits.
   const prefill = route?.params || null;
 
+  // PS-37 — refund mode. Opened from Detail's "Mark as refunded": the screen
+  // prefills merchant/category/amount from the original spend and, on save,
+  // stores the row with a NEGATIVE amount linked back via refund_of_expense_id
+  // so monthly_summary nets it out. Refunds are expense-only + quick-only.
+  const refundOfId = prefill?.refundOfExpenseId ?? null;
+  const isRefund = refundOfId != null;
+
   // 5.5 — top-level Expense | Income toggle. Income mode bypasses
   // pots/mood/recurring/items/payment and writes to the income table instead.
   const [kind, setKind] = useState('expense');
@@ -319,13 +326,16 @@ function Add({ navigation, route }) {
           category_id: selected.id,
           merchant: merchant.trim(),
           merchant_id: pickedMerchantIdRef.current ?? undefined,
-          amount: parseFloat(amount),
+          // PS-37 — a refund is the same spend, negated. Carbon is zeroed (a
+          // return doesn't emit) and the row points back at the original.
+          amount: isRefund ? -parseFloat(amount) : parseFloat(amount),
           mood: moodOn ? MOODS[moodIdx] : null,
-          carbon: settings.carbon_tracking ? estimateCarbon(selected, parseFloat(amount)) : 0,
+          carbon: isRefund ? 0 : (settings.carbon_tracking ? estimateCarbon(selected, parseFloat(amount)) : 0),
           recurring,
           payment_method: paymentMethod,
           tags: tagNames,
           expense_time,
+          refund_of_expense_id: refundOfId ?? undefined,
         });
         // 5.10 — every successful save reinforces the alias mapping so the
         // user's most recent choice wins the next time this merchant comes up.
@@ -415,7 +425,9 @@ function Add({ navigation, route }) {
       </View>
 
       {/* 5.5 — Expense | Income segmented toggle. Sits above Quick/Detailed so
-          the rest of the form swaps wholesale when kind flips. */}
+          the rest of the form swaps wholesale when kind flips. Hidden in
+          PS-37 refund mode — a refund is always an expense. */}
+      {!isRefund && (
       <View style={{ flexDirection: 'row', backgroundColor: F.surface,
         paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 8 }}>
         {[['expense', 'Expense'], ['income', 'Income']].map(([k, l]) => {
@@ -435,8 +447,9 @@ function Add({ navigation, route }) {
           );
         })}
       </View>
+      )}
 
-      {!isIncome && (
+      {!isIncome && !isRefund && (
         <View style={{ flexDirection: 'row', backgroundColor: F.surface,
           paddingHorizontal: 16, paddingBottom: 12, gap: 8 }}>
           {[['quick', 'Quick'], ['detailed', 'Detailed']].map(([k, l]) => {
@@ -462,9 +475,27 @@ function Add({ navigation, route }) {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: (!isIncome && mode === 'detailed') ? insets.bottom + 100 : 12 }}>
 
+        {/* PS-37 — refund banner. Makes it explicit the row will be stored as
+            a credit (negative amount) against the original spend. */}
+        {isRefund && (
+          <View style={{ marginTop: 16, padding: 14, borderRadius: 16,
+            backgroundColor: F.mint, borderWidth: 1, borderColor: F.sageD,
+            flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Text style={{ fontSize: 20 }}>↩</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: F.ink, fontWeight: '600' }}>
+                Refund of {prefill?.prefillMerchant || 'this spend'}
+              </Text>
+              <Text style={{ fontSize: 11, color: F.ink2, marginTop: 2 }}>
+                Saved as a credit (−{sym}{amount}) linked to the original.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* PS-09 — Quick-Entry Template chips. Hidden on income (templates
-            are expense-only) and when no templates exist. */}
-        {!isIncome && templates.length > 0 && (
+            are expense-only), in refund mode, and when no templates exist. */}
+        {!isIncome && !isRefund && templates.length > 0 && (
           <View style={{ marginTop: 10, marginBottom: 4 }}>
             <Text style={{ fontSize: 10, color: F.ink3, textTransform: 'uppercase',
               letterSpacing: 0.6, marginBottom: 6 }}>
@@ -494,7 +525,7 @@ function Add({ navigation, route }) {
         {(isIncome || mode === 'quick') ? (
           <View style={{ backgroundColor: F.cream, borderRadius: 24, padding: 24, marginTop: 16,
             alignItems: 'center' }}>
-            <Text style={{ fontSize: 11, color: F.ink2 }}>{isIncome ? 'I earned' : 'I spent'}</Text>
+            <Text style={{ fontSize: 11, color: F.ink2 }}>{isIncome ? 'I earned' : isRefund ? 'Refund amount' : 'I spent'}</Text>
             <Text style={{ fontSize: 56, color: heroAccent, fontWeight: '400', marginTop: 4 }}>
               {sym}{amount.split('.')[0]}
               <Text style={{ fontSize: 30, color: F.ink3 }}>.{(amount.split('.')[1] || '00').slice(0, 2)}</Text>
@@ -687,9 +718,11 @@ function Add({ navigation, route }) {
               ? 'Saving…'
               : isIncome
                 ? `Save · ${sym}${amount}`
-                : mode === 'quick'
-                  ? `Save · ${sym}${amount}`
-                  : `Save · ${sym}${itemsSum.toFixed(2)}`}
+                : isRefund
+                  ? `Refund · −${sym}${amount}`
+                  : mode === 'quick'
+                    ? `Save · ${sym}${amount}`
+                    : `Save · ${sym}${itemsSum.toFixed(2)}`}
           </Text>
         </TouchableOpacity>
       </View>

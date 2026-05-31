@@ -320,3 +320,35 @@ export function evaluatePantryLowStock({ pantry, settings, now = new Date() }) {
   }
   return out;
 }
+
+// PS-39 — Return-window closing reminder.
+//
+// One scheduled notification per still-returnable item, fired at 09:00 local
+// on (return_by_date − 1 day). `items` is the returnableItems() result (each
+// row carries id, name, merchant, return_by_date). Triggers already in the
+// past are skipped (no late-fire). Dedupe key embeds the date so re-running on
+// every scan can't double-schedule, while a re-stamped window re-arms.
+//
+// Gated by the deadline/"upcoming bill" channel (notif_sub_enabled, PS-41) —
+// a return deadline is the same shape of reminder as a sub/insurance due date.
+export function evaluateReturnWindows({ items, settings, now = new Date() }) {
+  if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_sub_enabled)) return [];      // PS-41 deadline channel
+  const out = [];
+  for (const it of (items || [])) {
+    if (!it || !it.return_by_date) continue;
+    const trigger = atLocal0900(it.return_by_date, 1);
+    if (!trigger || trigger.getTime() <= now.getTime()) continue;
+    const name = it.name ? String(it.name) : 'an item';
+    const where = it.merchant ? ` from ${it.merchant}` : '';
+    out.push({
+      dedupe_key: `return:${it.id}:${it.return_by_date}`,
+      kind: 'return_window',
+      title: `Return window closing: ${name}`,
+      body: `Last day to return ${name}${where} is ${it.return_by_date}.`,
+      payload: { item_id: it.id, expense_id: it.expense_id ?? null, return_by_date: it.return_by_date },
+      schedule: { type: 'at', date: trigger, identifier: `return:${it.id}` },
+    });
+  }
+  return out;
+}

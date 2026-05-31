@@ -1,0 +1,47 @@
+{
+  "name": "mandi_house_produce_no_rs",
+  "notes": "Real thermal-printed MANDI HOUSE sabzi-mandi receipt (Noida, BILL #146, 28/05/26 20:43:4_). Same printer family as mandi_house_produce.json but a STRIPPED variant: column header reads 'ITEM NAME QTY/WT @RATE AMT ₹' (rupee glyph instead of 'Rs.') and the total footer is 'NET ₹70.00' instead of 'NET Rs.'. Subtotal 69.78 is printed without a label on its own row (right-aligned), GST @ 0.00% 0.00, ROUND OFF 0.22, NET ₹70.00. 4 items: POTATO PAH, CUCUMBER 0, ONION, TOMATO HYB — all sub-kg weights. CUCUMBER 0 — the variety designator '0' is parsed as a trailing qty by wrapTrailingQty (cosmetic rendering 'CUCUMBER x 0'); user can edit in Review if it bothers them, known minor variety-name issue not worth a heuristic for. Exercises (a) tolerant mandi signature (₹ glyph instead of Rs., plus data-driven kg-row signal); (b) 'net(?=\\\\s*[₹$\\\\d])' total keyword catching 'NET ₹70.00'; (c) 'round off' fee keyword catching ROUND OFF; (d) column-header phrases in BILL_HEADER_KEYWORDS so findNameBackward doesn't adopt the column header as the name of bare-amount subtotal/round-off rows.",
+  "pots": [
+    {"id": 1, "name": "Groceries"},
+    {"id": 2, "name": "Produce"}
+  ],
+  "expected": {
+    "merchant": "MANDI HOUSE",
+    "date": "2026-05-28",
+    "total": 70,
+    "format": "mandi",
+    "items": [
+      {"name": "POTATO PAH", "price": 14.21},
+      {"name": "CUCUMBER x 0", "price": 20.70},
+      {"name": "ONION", "price": 15.57},
+      {"name": "TOMATO HYB", "price": 19.30}
+    ]
+  },
+  "ocr": {
+    "blocks": [
+      {
+        "frame": {"left": 0, "top": 0, "width": 1000, "height": 900},
+        "lines": [
+          {"text": "MANDI HOUSE", "frame": {"left": 380, "top": 60, "width": 280, "height": 36}, "elements": [{"text": "MANDI", "frame": {"left": 380, "width": 120}}, {"text": "HOUSE", "frame": {"left": 520, "width": 140}}]},
+          {"text": "NOIDA", "frame": {"left": 460, "top": 100, "width": 80, "height": 28}, "elements": [{"text": "NOIDA", "frame": {"left": 460, "width": 80}}]},
+          {"text": "MOB 8130810110", "frame": {"left": 360, "top": 130, "width": 320, "height": 26}, "elements": [{"text": "MOB", "frame": {"left": 360, "width": 56}}, {"text": "8130810110", "frame": {"left": 440, "width": 240}}]},
+          {"text": "BILL # 146  28/05/26  20:43:49", "frame": {"left": 100, "top": 165, "width": 800, "height": 28}, "elements": [{"text": "BILL", "frame": {"left": 100, "width": 56}}, {"text": "#", "frame": {"left": 170, "width": 18}}, {"text": "146", "frame": {"left": 200, "width": 42}}, {"text": "28/05/26", "frame": {"left": 280, "width": 200}}, {"text": "20:43:49", "frame": {"left": 500, "width": 200}}]},
+
+          {"text": "ITEM NAME    QTY/WT  @RATE  AMT ₹", "frame": {"left": 60, "top": 215, "width": 900, "height": 28}, "elements": [{"text": "ITEM", "frame": {"left": 60, "width": 56}}, {"text": "NAME", "frame": {"left": 130, "width": 90}}, {"text": "QTY/WT", "frame": {"left": 500, "width": 84}}, {"text": "@RATE", "frame": {"left": 650, "width": 70}}, {"text": "AMT", "frame": {"left": 800, "width": 42}}, {"text": "₹", "frame": {"left": 880, "width": 22}}]},
+
+          {"text": "POTATO PAH  0.490  29.00  14.21", "frame": {"left": 60, "top": 265, "width": 900, "height": 28}, "elements": [{"text": "POTATO", "frame": {"left": 60, "width": 90}}, {"text": "PAH", "frame": {"left": 150, "width": 60}}, {"text": "0.490", "frame": {"left": 500, "width": 90}}, {"text": "29.00", "frame": {"left": 650, "width": 90}}, {"text": "14.21", "frame": {"left": 850, "width": 90}}]},
+          {"text": "CUCUMBER 0  0.345  60.00  20.70", "frame": {"left": 60, "top": 300, "width": 900, "height": 28}, "elements": [{"text": "CUCUMBER", "frame": {"left": 60, "width": 130}}, {"text": "0", "frame": {"left": 200, "width": 22}}, {"text": "0.345", "frame": {"left": 500, "width": 90}}, {"text": "60.00", "frame": {"left": 650, "width": 90}}, {"text": "20.70", "frame": {"left": 850, "width": 90}}]},
+          {"text": "ONION  0.445  35.00  15.57", "frame": {"left": 60, "top": 335, "width": 900, "height": 28}, "elements": [{"text": "ONION", "frame": {"left": 60, "width": 90}}, {"text": "0.445", "frame": {"left": 500, "width": 90}}, {"text": "35.00", "frame": {"left": 650, "width": 90}}, {"text": "15.57", "frame": {"left": 850, "width": 90}}]},
+          {"text": "TOMATO HYB  0.495  39.00  19.30", "frame": {"left": 60, "top": 370, "width": 900, "height": 28}, "elements": [{"text": "TOMATO", "frame": {"left": 60, "width": 90}}, {"text": "HYB", "frame": {"left": 160, "width": 42}}, {"text": "0.495", "frame": {"left": 500, "width": 90}}, {"text": "39.00", "frame": {"left": 650, "width": 90}}, {"text": "19.30", "frame": {"left": 850, "width": 90}}]},
+
+          {"text": "69.78", "frame": {"left": 800, "top": 430, "width": 120, "height": 28}, "elements": [{"text": "69.78", "frame": {"left": 800, "width": 120}}]},
+          {"text": "GST @ 0.00%   0.00", "frame": {"left": 60, "top": 465, "width": 900, "height": 28}, "elements": [{"text": "GST", "frame": {"left": 60, "width": 42}}, {"text": "@", "frame": {"left": 130, "width": 20}}, {"text": "0.00%", "frame": {"left": 170, "width": 90}}, {"text": "0.00", "frame": {"left": 800, "width": 90}}]},
+          {"text": "ROUND OFF   0.22", "frame": {"left": 60, "top": 500, "width": 900, "height": 28}, "elements": [{"text": "ROUND", "frame": {"left": 60, "width": 90}}, {"text": "OFF", "frame": {"left": 160, "width": 56}}, {"text": "0.22", "frame": {"left": 800, "width": 90}}]},
+          {"text": "NET   ₹ 70.00", "frame": {"left": 60, "top": 540, "width": 900, "height": 36}, "elements": [{"text": "NET", "frame": {"left": 60, "width": 56}}, {"text": "₹", "frame": {"left": 700, "width": 30}}, {"text": "70.00", "frame": {"left": 750, "width": 170}}]},
+          {"text": "ITEMS:4  QTY:0  Wt:1.775 Kg", "frame": {"left": 100, "top": 600, "width": 700, "height": 24}, "elements": [{"text": "ITEMS:4", "frame": {"left": 100, "width": 140}}, {"text": "QTY:0", "frame": {"left": 280, "width": 110}}, {"text": "Wt:1.775", "frame": {"left": 440, "width": 200}}, {"text": "Kg", "frame": {"left": 660, "width": 40}}]},
+          {"text": "Thank you, Have a Nice Day", "frame": {"left": 220, "top": 640, "width": 540, "height": 24}, "elements": [{"text": "Thank you, Have a Nice Day", "frame": {"left": 220, "width": 540}}]}
+        ]
+      }
+    ]
+  }
+}

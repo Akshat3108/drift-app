@@ -58,7 +58,7 @@ function ReportRow({ icon, title, sub, F, onPress }) {
 }
 
 function Hub({ navigation }) {
-  const { F, sym, settings } = useApp();
+  const { F, sym, settings, income } = useApp();
   const insets = useSafeAreaInsets();
 
   const [velocity, setVelocity]   = useState(null);
@@ -213,6 +213,12 @@ function Hub({ navigation }) {
         <ReportRow icon="🌊" title="Money flow"
           sub="Income → category Sankey for this month"
           F={F} onPress={() => navigation.navigate('MoneyFlow')}/>
+        {/* PS-43 — income source mix, shown once any income is recorded. */}
+        {income?.length >= 1 && (
+          <ReportRow icon="💵" title="Income mix"
+            sub="Sources this month + 12-month trend"
+            F={F} onPress={() => navigation.navigate('IncomeBreakdown')}/>
+        )}
         <ReportRow icon="🎭" title="Mood × spend"
           sub="How feelings shape your spending"
           F={F} onPress={() => navigation.navigate('MoodSpend')}/>

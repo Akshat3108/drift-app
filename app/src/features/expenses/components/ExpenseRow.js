@@ -8,6 +8,8 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { potBg } from '../../../theme';
 import { PAYMENT_EMOJI } from '@features/expenses/filters';
+import { pickReceiptUri } from '@features/expenses/receiptUri';
+import { DriftImage } from '@components/DriftImage';
 import SwipeableRow from '@components/SwipeableRow';
 
 function ExpenseRow({
@@ -18,10 +20,14 @@ function ExpenseRow({
   isLast,
   isSelected,
   selectionMode,
+  showThumb,        // PS-46 — opt-in receipt thumbnail in place of the emoji
   onPress,
   onLongPress,
   onSwipeDelete,
 }) {
+  // PS-46 — when enabled, a receipt-bearing row shows its 320px thumbnail in
+  // the category-emoji slot. Selection mode always wins (shows the ✓ tick).
+  const thumbUri = showThumb ? pickReceiptUri(expense).thumb : null;
   // 8.1 — each row carries its own card-edge borders since SectionList's
   // per-section data can't be wrapped in an outer rounded container without
   // breaking virtualisation. Visual stays identical to the original wrapped
@@ -53,11 +59,16 @@ function ExpenseRow({
         <View style={{
           width: 42, height: 42, borderRadius: 13,
           backgroundColor: potBg(F, expense.category_color || 'cream'),
-          alignItems: 'center', justifyContent: 'center',
+          alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
-          <Text style={{ fontSize: 20 }}>
-            {isSelected ? '✓' : (expense.category_emoji || '💰')}
-          </Text>
+          {isSelected ? (
+            <Text style={{ fontSize: 20 }}>✓</Text>
+          ) : thumbUri ? (
+            <DriftImage source={{ uri: thumbUri }} recyclingKey={thumbUri}
+              style={{ width: 42, height: 42, borderRadius: 13 }} />
+          ) : (
+            <Text style={{ fontSize: 20 }}>{expense.category_emoji || '💰'}</Text>
+          )}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 14, fontWeight: '600', color: F.ink }}>

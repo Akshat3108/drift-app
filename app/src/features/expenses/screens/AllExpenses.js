@@ -16,7 +16,7 @@ import { withProfiler } from '@core/utils/perf';
 const SELECTION_CAP = 500;
 
 function AllExpenses({ navigation, route }) {
-  const { F, sym, pots, expenses, trips, refresh } = useApp();
+  const { F, sym, pots, expenses, trips, refresh, settings } = useApp();
   const { bulkRemoveExpenses, bulkRestoreExpenses, bulkRecategorizeExpenses, bulkRetripExpenses, removeExpense, restoreExpense } = useExpenses();
   const toast = useToast();
   const insets = useSafeAreaInsets();
@@ -400,11 +400,12 @@ function AllExpenses({ navigation, route }) {
       isLast={index === section.data.length - 1}
       isSelected={selectedIds.has(item.id)}
       selectionMode={selectionMode}
+      showThumb={!!settings?.show_receipt_thumbnails}
       onPress={onRowPress}
       onLongPress={onRowLongPress}
       onSwipeDelete={onRowSwipeDelete}
     />
-  ), [F, sym, selectedIds, selectionMode, onRowPress, onRowLongPress, onRowSwipeDelete]);
+  ), [F, sym, selectedIds, selectionMode, settings?.show_receipt_thumbnails, onRowPress, onRowLongPress, onRowSwipeDelete]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,

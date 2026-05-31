@@ -6,6 +6,7 @@ import { useItemActions } from '@features/items/context';
 import { usePriceAlerts } from '@features/price_alerts/context';
 import { cheapestMerchantPerItem, pricePrediction } from '../../../analytics';
 import ItemHistoryRow from '@features/items/components/ItemHistoryRow';
+import TrendChart from '@components/charts/TrendChart';
 
 function ItemTrend({ route, navigation }) {
   const { F, sym } = useApp();
@@ -71,11 +72,11 @@ function ItemTrend({ route, navigation }) {
     ? ((last.unit_price - first.unit_price) / first.unit_price) * 100
     : null;
 
-  const priceData = history.map(h => h.unit_price);
-  const maxPrice  = priceData.length ? Math.max(...priceData) : 0;
-  const minPrice  = priceData.length ? Math.min(...priceData) : 0;
+  // Last 12 price points feed the trend chart; priceOffset maps a chart index
+  // back to the global history index for the selected-row callout.
+  const priceWindow = useMemo(() => history.slice(-12), [history]);
+  const priceOffset = history.length - priceWindow.length;
 
-  const consMax = consumption.length ? Math.max(...consumption.map(c => c.qty_canonical)) : 0;
   const consTotal = consumption.reduce((s, c) => s + c.qty_canonical, 0);
   const canonicalUnit = stats?.canonical_unit || last?.canonical_unit || 'pcs';
 
@@ -205,28 +206,19 @@ function ItemTrend({ route, navigation }) {
                 Scan another receipt to see the trend.
               </Text>
             ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 120 }}>
-                {history.slice(-12).map((h, i) => {
-                  const range = Math.max(1, maxPrice - minPrice);
-                  const norm = (h.unit_price - minPrice) / range;
-                  const barH = 20 + norm * 80;
-                  const isSel = selectedIdx === (history.length - Math.min(12, history.length)) + i;
-                  return (
-                    <TouchableOpacity key={i}
-                      onPress={() => setSelectedIdx((history.length - Math.min(12, history.length)) + i)}
-                      style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: 120 }}>
-                      <View style={{
-                        width: '100%', height: barH, borderRadius: 6,
-                        backgroundColor: isSel ? F.coral : F.blushD,
-                        opacity: isSel ? 1 : 0.5,
-                      }}/>
-                      <Text style={{ fontSize: 9, color: F.ink3, marginTop: 4 }}>
-                        {h.purchase_date.slice(5)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              <TrendChart
+                chartId="item.priceTrend"
+                series={priceWindow.map((h) => ({ value: h.unit_price, label: h.purchase_date.slice(5), key: h.id }))}
+                allow={['line', 'area', 'bar', 'dot']}
+                defaultType="line"
+                height={140}
+                zeroBased={false}
+                color={F.coral}
+                selectedIndex={selectedIdx == null ? null : selectedIdx - priceOffset}
+                onSelectIndex={(i) => setSelectedIdx(priceOffset + i)}
+                showInspectLabel={false}
+                formatValue={(v) => `${sym}${Number(v).toFixed(2)}`}
+              />
             )}
           </View>
 
@@ -305,25 +297,17 @@ function ItemTrend({ route, navigation }) {
             {consumption.length === 0 ? (
               <Text style={{ textAlign: 'center', color: F.ink3, padding: 20 }}>No data yet</Text>
             ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 120 }}>
-                {consumption.map((c, i) => {
-                  const barH = consMax > 0 ? (c.qty_canonical / consMax) * 100 : 0;
-                  return (
-                    <View key={i} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: 120 }}>
-                      <Text style={{ fontSize: 9, color: F.ink3, marginBottom: 3 }}>
-                        {c.qty_canonical.toFixed(canonicalUnit === 'pcs' ? 0 : 1)}
-                      </Text>
-                      <View style={{
-                        width: '100%', height: Math.max(8, barH), borderRadius: 6,
-                        backgroundColor: F.sageD,
-                      }}/>
-                      <Text style={{ fontSize: 9, color: F.ink3, marginTop: 4 }}>
-                        {String(c.period).slice(-5)}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
+              <TrendChart
+                chartId="item.consumption"
+                series={consumption.map((c) => ({
+                  value: c.qty_canonical, label: String(c.period).slice(-5), key: String(c.period),
+                }))}
+                allow={['bar', 'line', 'area', 'dot']}
+                defaultType="bar"
+                height={150}
+                color={F.sageD}
+                formatValue={(v) => Number(v).toFixed(canonicalUnit === 'pcs' ? 0 : 1)}
+              />
             )}
             {consumption.length > 0 && (
               <Text style={{ fontSize: 12, color: F.ink2, marginTop: 14, textAlign: 'center' }}>
@@ -451,8 +435,8 @@ function ItemTrend({ route, navigation }) {
     F, sym, displayName, last, changeAll, canonicalUnit,
     watching, normalizedName, navigation,
     cheapest, tab,
-    selectedIdx, history, maxPrice, minPrice, stats, prediction,
-    bucket, consumption, consMax, consTotal,
+    selectedIdx, history, priceWindow, priceOffset, stats, prediction,
+    bucket, consumption, consTotal,
     sameQty,
   ]);
 

@@ -1,28 +1,16 @@
 // 7.13 — NetWorth trajectory chart.
 //
-// Renders an SVG line of `net` over time with range pills (30d / 90d / 1y / All)
-// and tap-to-pin callout. Falls back silently to a numeric summary when
-// react-native-svg fails to load (dev shells).
+// Renders `net` over time with range pills (30d / 90d / 1y / All) and a
+// tap-to-pin callout. The series itself is drawn by the shared TrendChart
+// (line / area / bar / dot, switchable via its toggle); this component owns the
+// data loading, the range pills, the pinned-day callout and the net=0 baseline.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useTheme } from '@core/theme/ThemeContext';
 import { useAccounts } from '@features/accounts/context';
 import { useSettings } from '@features/profile/settings.context';
-
-let Svg = null, Polyline = null, Line = null, Circle = null;
-try {
-  const mod = require('react-native-svg');
-  Svg      = mod.Svg ?? mod.default;
-  Polyline = mod.Polyline;
-  Line     = mod.Line;
-  Circle   = mod.Circle;
-} catch (_) { /* dev shell — falls back to a numeric strip */ }
-
-const SCREEN_W = Dimensions.get('window').width;
-const CHART_W  = SCREEN_W - 40;
-const CHART_H  = 180;
-const PAD      = { top: 14, right: 14, bottom: 26, left: 14 };
+import TrendChart from '@components/charts/TrendChart';
 
 const RANGES = [
   { key: '30',  label: '30d',  days: 30,    all: false },
@@ -34,38 +22,6 @@ const RANGES = [
 function fmt(sym, n) {
   const v = Math.round(Number(n) || 0);
   return `${sym}${v.toLocaleString('en-IN')}`;
-}
-
-// Build geometry: x positions evenly spaced; y mapped against [min*0.95, max*1.05]
-// so a negative net still renders. Returns null when fewer than 2 points exist
-// (callers should hide the chart in that state).
-function chartGeometry(series) {
-  if (!series || series.length < 2) return null;
-  const usableW = CHART_W - PAD.left - PAD.right;
-  const usableH = CHART_H - PAD.top - PAD.bottom;
-  const nets = series.map(r => Number(r.net) || 0);
-  let lo = Math.min(...nets);
-  let hi = Math.max(...nets);
-  if (lo === hi) {
-    // Flat line — give it some padding so a non-zero value isn't pinned to bottom.
-    const span = Math.abs(lo) > 0 ? Math.abs(lo) * 0.1 : 1;
-    lo -= span;
-    hi += span;
-  } else {
-    const span = hi - lo;
-    lo -= span * 0.05;
-    hi += span * 0.05;
-  }
-  const stepX = usableW / (series.length - 1);
-  const pts = series.map((r, i) => ({
-    x: PAD.left + i * stepX,
-    y: PAD.top + (1 - ((Number(r.net) - lo) / (hi - lo))) * usableH,
-    date: r.snapshot_date,
-    net: Number(r.net) || 0,
-    assets: Number(r.total_assets) || 0,
-    liab:   Number(r.total_liabilities) || 0,
-  }));
-  return { pts, lo, hi };
 }
 
 export default function NetWorthChart() {
@@ -96,13 +52,21 @@ export default function NetWorthChart() {
     return () => { cancelled = true; };
   }, [range, refreshGen, trajectory, snapshotCount]);
 
-  const geo = useMemo(() => chartGeometry(series), [series]);
+  // Chart series + whether to draw the net=0 baseline (only when the data
+  // actually straddles zero, matching the old behaviour).
+  const { chartSeries, showZero } = useMemo(() => {
+    const nets = series.map(r => Number(r.net) || 0);
+    return {
+      chartSeries: series.map(r => ({ value: Number(r.net) || 0, key: r.snapshot_date })),
+      showZero: nets.length > 0 && Math.min(...nets) < 0 && Math.max(...nets) > 0,
+    };
+  }, [series]);
 
   // Hide the chart until we have at least a week of snapshots — a 2-point line
   // looks worse than nothing.
   if (count < 7) return null;
 
-  const pinned = pinIdx != null && geo ? geo.pts[pinIdx] : null;
+  const pinned = pinIdx != null && series[pinIdx] ? series[pinIdx] : null;
 
   return (
     <View style={{ backgroundColor: F.surface, borderRadius: 18, padding: 12,
@@ -128,29 +92,23 @@ export default function NetWorthChart() {
         })}
       </View>
 
-      {geo && Svg && Polyline ? (
+      {series.length >= 2 ? (
         <View>
-          <Svg width={CHART_W} height={CHART_H}>
-            {/* baseline at net=0 if visible inside [lo, hi] */}
-            {geo.lo < 0 && geo.hi > 0 && (() => {
-              const zeroY = PAD.top + (1 - ((0 - geo.lo) / (geo.hi - geo.lo))) * (CHART_H - PAD.top - PAD.bottom);
-              return (
-                <Line x1={PAD.left} x2={CHART_W - PAD.right} y1={zeroY} y2={zeroY}
-                  stroke={F.line} strokeWidth="1" strokeDasharray="3 3"/>
-              );
-            })()}
-            <Polyline
-              points={geo.pts.map(p => `${p.x},${p.y}`).join(' ')}
-              stroke={F.coral} strokeWidth="2" fill="none"/>
-            {pinned && (
-              <Circle cx={pinned.x} cy={pinned.y} r={5} fill={F.coral}/>
-            )}
-            {/* Hit-zones: invisible circles so taps land cleanly */}
-            {geo.pts.map((p, i) => (
-              <Circle key={`hit-${i}`} cx={p.x} cy={p.y} r={12} fill="#0000"
-                onPress={() => setPinIdx(i)}/>
-            ))}
-          </Svg>
+          <TrendChart
+            chartId="networth.trajectory"
+            series={chartSeries}
+            allow={['line', 'area', 'bar', 'dot']}
+            defaultType="line"
+            height={180}
+            zeroBased={false}
+            color={F.coral}
+            refLine={showZero ? { value: 0 } : null}
+            selectedIndex={pinIdx}
+            onSelectIndex={(i) => setPinIdx(i)}
+            showInspectLabel={false}
+            showXLabels={false}
+            formatValue={(v) => `${v < 0 ? '−' : ''}${fmt(sym, Math.abs(v))}`}
+          />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between',
             paddingHorizontal: 4, marginTop: 2 }}>
             <Text style={{ fontSize: 10, color: F.ink3 }}>{series[0]?.snapshot_date || ''}</Text>
@@ -159,7 +117,7 @@ export default function NetWorthChart() {
         </View>
       ) : (
         <Text style={{ fontSize: 12, color: F.ink3, padding: 12 }}>
-          {!Svg ? '(install react-native-svg for chart)' : 'Need at least 2 snapshots to draw a line.'}
+          Need at least 2 snapshots to draw a line.
         </Text>
       )}
 
@@ -167,12 +125,12 @@ export default function NetWorthChart() {
         borderRadius: 12, borderWidth: 1, borderColor: F.line }}>
         {pinned ? (
           <>
-            <Text style={{ fontSize: 12, color: F.ink2 }}>{pinned.date}</Text>
-            <Text style={{ fontSize: 16, color: pinned.net >= 0 ? F.ink : F.coral, fontWeight: '600' }}>
-              Net {pinned.net < 0 ? '−' : ''}{fmt(sym, Math.abs(pinned.net))}
+            <Text style={{ fontSize: 12, color: F.ink2 }}>{pinned.snapshot_date}</Text>
+            <Text style={{ fontSize: 16, color: (Number(pinned.net) || 0) >= 0 ? F.ink : F.coral, fontWeight: '600' }}>
+              Net {(Number(pinned.net) || 0) < 0 ? '−' : ''}{fmt(sym, Math.abs(Number(pinned.net) || 0))}
             </Text>
             <Text style={{ fontSize: 11, color: F.ink3, marginTop: 2 }}>
-              {fmt(sym, pinned.assets)} assets · {fmt(sym, pinned.liab)} owed
+              {fmt(sym, pinned.total_assets)} assets · {fmt(sym, pinned.total_liabilities)} owed
             </Text>
           </>
         ) : (

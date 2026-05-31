@@ -85,6 +85,45 @@ export const income = {
     );
   },
 
+  // PS-43 — income source aggregation. Active-month breakdown for the donut:
+  // one row per `source`, ordered by total DESC. `monthlyTotal` already sums
+  // the same window; this just splits it by source.
+  async bySource({ month } = {}) {
+    const m = month || new Date().toISOString().slice(0, 7);
+    return all(
+      `SELECT source, SUM(amount) AS total, COUNT(*) AS txn_count
+         FROM income
+        WHERE month_key = ? AND ${NOT_DELETED}
+        GROUP BY source
+        ORDER BY total DESC`,
+      [m]
+    );
+  },
+
+  // PS-43 — per-source monthly totals over a trailing window, for the stacked
+  // bar. Returns flat {month_key, source, total} rows; the screen pivots them
+  // into one stack per source per month. `months` is the lookback count
+  // (12 → ~13 buckets incl. the current month, matching monthlyTrend's shape).
+  async bySourceTrend({ months = 12 } = {}) {
+    return all(
+      `SELECT month_key, source, SUM(amount) AS total
+         FROM income
+        WHERE month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
+          AND ${NOT_DELETED}
+        GROUP BY month_key, source
+        ORDER BY month_key`,
+      [months]
+    );
+  },
+
+  // PS-43 — distinct live source count, for the ≥3-source readiness gate.
+  async sourceCount() {
+    const row = await one(
+      `SELECT COUNT(DISTINCT source) AS n FROM income WHERE ${NOT_DELETED}`
+    );
+    return row?.n || 0;
+  },
+
   // 5.7 — list income rows for export. Only the `dateRange` axis of the
   // shared `criteria` object is applied here — income doesn't share columns
   // with expenses, so categoryIds/merchantIds/ids/etc. are silently ignored.

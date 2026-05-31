@@ -8,7 +8,7 @@ import { potBg } from '../../../theme';
 
 function PotDetail({ route, navigation }) {
   const { potId } = route.params;
-  const { F, sym, pots, expenses } = useApp();
+  const { F, sym, pots, expenses, settings } = useApp();
   const insets = useSafeAreaInsets();
 
   const pot = pots.find(p => p.id === potId);
@@ -49,9 +49,10 @@ function PotDetail({ route, navigation }) {
       pot={pot}
       isFirst={index === 0}
       isLast={index === section.data.length - 1}
+      showThumb={!!settings?.show_receipt_thumbnails}
       onPress={onRowPress}
     />
-  ), [F, sym, pot, onRowPress]);
+  ), [F, sym, pot, settings?.show_receipt_thumbnails, onRowPress]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,

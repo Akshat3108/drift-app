@@ -11,6 +11,12 @@ const BUDGET_BANDS = [
   { pct: 1.00, label: '100%' },
 ];
 
+// PS-41 — per-channel gate. A channel fires only when BOTH the master
+// `notifications_enabled` and its own channel flag are on. The master ANDs over
+// the channels. Missing/undefined flags resolve to ON so pre-v51 settings
+// objects (and the maintenance job's cached settings) keep current behaviour.
+const chOn = (v) => (v == null ? true : !!v);
+
 function currentMonthKey(now = new Date()) {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, '0');
@@ -28,6 +34,7 @@ function fmtAmount(n, sym = '₹') {
 // repeat fires.
 export function evaluateBudgetThresholds({ pots, settings, monthKey = currentMonthKey(), sym = '₹' }) {
   if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_budget_enabled)) return [];   // PS-41
   const threshold = Number(settings?.notif_budget_threshold) || 0.8;
   // Only fire bands AT or ABOVE the user's chosen threshold. The 100% band
   // always fires when crossed (regardless of threshold) since that's the
@@ -75,6 +82,7 @@ function atLocal0900(dateStr, leadDays) {
 // whose trigger is in the past are skipped (no late-fire).
 export function evaluateSubsDue({ subs, settings, now = new Date(), sym = '₹' }) {
   if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_sub_enabled)) return [];      // PS-41
   const leadDays = Number(settings?.notif_sub_lead_days);
   if (!Number.isFinite(leadDays) || leadDays <= 0) return [];
   const out = [];
@@ -122,6 +130,7 @@ function formatDateLocalYMD(d) {
 // so subsequent jumps measure from this new peak).
 export function evaluatePriceAlerts({ observations, alerts, settings, now = new Date(), sym = '₹' }) {
   if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_price_enabled)) return [];    // PS-41
   const obs = Array.isArray(observations) ? observations : [];
   if (!obs.length) return [];
   const alertList = Array.isArray(alerts) ? alerts : [];
@@ -220,6 +229,9 @@ function fmtPantryQty(n, unit) {
 // so a single user-tunable lead value makes sense.
 export function evaluateInsuranceRenewals({ policies, settings, now = new Date(), sym = '₹' }) {
   if (!settings?.notifications_enabled) return [];
+  // PS-41 — insurance renewals share the "sub" (upcoming-bill) channel, as they
+  // already share `notif_sub_lead_days`.
+  if (!chOn(settings?.notif_sub_enabled)) return [];
   const leadDays = Number(settings?.notif_sub_lead_days);
   if (!Number.isFinite(leadDays) || leadDays <= 0) return [];
   const out = [];
@@ -252,6 +264,8 @@ export function evaluateInsuranceRenewals({ policies, settings, now = new Date()
 // `holdings` is the array of decorated rows from useInvestments().holdings.
 export function evaluateHoldingsNavReminder({ holdings, settings, now = new Date() }) {
   if (!settings?.notifications_enabled) return [];
+  // PS-41 note: the NAV-staleness nudge is not one of the five per-channel
+  // toggles, so it's gated by the master switch only (behaviour unchanged).
   const live = (holdings || []).filter(h => !h.deleted_at);
   if (live.length === 0) return [];
   const cutoff = now.getTime() - 25 * 24 * 60 * 60 * 1000;
@@ -284,6 +298,7 @@ export function evaluateHoldingsNavReminder({ holdings, settings, now = new Date
 // user still hasn't restocked, but doesn't spam on intra-week mutations.
 export function evaluatePantryLowStock({ pantry, settings, now = new Date() }) {
   if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_lowstock_enabled)) return [];  // PS-41
   const week = currentWeekKey(now);
   const out = [];
   for (const row of (pantry || [])) {

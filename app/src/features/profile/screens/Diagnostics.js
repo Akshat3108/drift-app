@@ -13,11 +13,15 @@
 // is wired up.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert, Modal, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@core/theme/ThemeContext';
-import { all, exec } from '../../../db';
+import { all, one, exec } from '../../../db';
 import { logError } from '@core/utils/log';
+
+// Mirrors app.json's version (same hardcode as the Profile footer — no
+// expo-constants dep in this project). Bump both together.
+const APP_VERSION = '1.0.0';
 
 function StatRow({ row, F }) {
   const avg = row.call_count > 0 ? (row.total_ms / row.call_count).toFixed(1) : '0.0';
@@ -71,19 +75,25 @@ export default function Diagnostics() {
   const insets = useSafeAreaInsets();
   const [stats, setStats] = useState([]);
   const [slow, setSlow] = useState([]);
+  const [schemaV, setSchemaV] = useState(0);
   const [expanded, setExpanded] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // PS-50 — fallback modal when no mail client can handle the mailto: intent.
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [s, l] = await Promise.all([
+      const [s, l, sv] = await Promise.all([
         all(`SELECT label, call_count, total_ms, max_ms, slow_count, last_run_at
              FROM db_stats ORDER BY total_ms DESC LIMIT 100`),
         all(`SELECT id, label, sql, duration_ms, occurred_at
              FROM db_slow_log ORDER BY id DESC LIMIT 50`),
+        one(`SELECT COALESCE(MAX(version), 0) AS v FROM schema_version`),
       ]);
       setStats(s || []);
       setSlow(l || []);
+      setSchemaV(sv?.v ?? 0);
     } catch (e) { logError('diagnostics:load', e); }
   }, []);
 
@@ -113,6 +123,47 @@ export default function Diagnostics() {
       }},
     ]);
   };
+
+  // PS-50 — assemble a PII-free diagnostic report. db_stats labels are repo
+  // method names and db_slow_log.sql is parameterised (values are bound as `?`,
+  // never stored), so no merchant names / amounts appear here.
+  const buildReport = useCallback(() => {
+    const lines = [];
+    lines.push('--- Drift diagnostics (no personal data) ---');
+    lines.push(`App version: ${APP_VERSION}`);
+    lines.push(`Schema version: ${schemaV}`);
+    lines.push(`Platform: ${Platform.OS} ${Platform.Version}`);
+    lines.push('');
+    lines.push('Top queries by total time:');
+    if (stats.length === 0) lines.push('  (none recorded)');
+    for (const r of stats.slice(0, 8)) {
+      const avg = r.call_count > 0 ? (r.total_ms / r.call_count).toFixed(1) : '0.0';
+      lines.push(`  ${r.label} — ${r.total_ms}ms (${r.call_count}×, avg ${avg}ms, max ${r.max_ms}ms)`);
+    }
+    lines.push('');
+    lines.push('Recent slow queries:');
+    if (slow.length === 0) lines.push('  (none logged)');
+    for (const r of slow.slice(0, 20)) {
+      lines.push(`  ${r.label} — ${r.duration_ms}ms @ ${r.occurred_at}`);
+    }
+    return lines.join('\n');
+  }, [stats, slow, schemaV]);
+
+  const sendFeedback = useCallback(async () => {
+    const report = buildReport();
+    const subject = `Drift feedback v${APP_VERSION}`;
+    const body = `Describe your feedback here:\n\n\n\n${report}\n`;
+    const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    try {
+      await Linking.openURL(url);
+    } catch (e) {
+      // No mail client handled the intent — fall back to a selectable modal so
+      // the user can long-press-copy the report into any app.
+      logError('diagnostics:sendFeedback', e);
+      setFeedbackText(`${subject}\n\n${report}`);
+      setFeedbackOpen(true);
+    }
+  }, [buildReport]);
 
   return (
     <ScrollView
@@ -160,6 +211,13 @@ export default function Diagnostics() {
             ))}
       </View>
 
+      {/* PS-50 — send a PII-free diagnostic report via the user's mail client. */}
+      <TouchableOpacity onPress={sendFeedback} activeOpacity={0.8}
+        style={{ padding: 14, borderRadius: 12, backgroundColor: F.coral,
+          alignItems: 'center', marginBottom: 10 }}>
+        <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>✉️  Send feedback</Text>
+      </TouchableOpacity>
+
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <TouchableOpacity onPress={clearStats} activeOpacity={0.7}
           style={{ flex: 1, padding: 12, borderRadius: 12, borderWidth: 1,
@@ -172,6 +230,33 @@ export default function Diagnostics() {
           <Text style={{ color: F.ink, fontSize: 13 }}>Clear slow log</Text>
         </TouchableOpacity>
       </View>
+
+      {/* PS-50 — fallback when no mail client is installed. Long-press the text
+          to select + copy it into any app. */}
+      <Modal visible={feedbackOpen} animationType="slide" transparent
+        onRequestClose={() => setFeedbackOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: F.bg, padding: 20, maxHeight: '80%',
+            borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom + 20 }}>
+            <Text style={{ fontSize: 18, color: F.ink, fontWeight: '500', marginBottom: 4 }}>
+              No mail client found
+            </Text>
+            <Text style={{ fontSize: 12, color: F.ink3, marginBottom: 12 }}>
+              Long-press the report below to select and copy it, then paste it wherever you like.
+            </Text>
+            <ScrollView style={{ backgroundColor: F.surface, borderRadius: 12, borderWidth: 1,
+              borderColor: F.line, padding: 12, marginBottom: 14 }}>
+              <Text selectable style={{ fontSize: 11, color: F.ink2, fontFamily: 'monospace' }}>
+                {feedbackText}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity onPress={() => setFeedbackOpen(false)}
+              style={{ padding: 14, borderRadius: 12, backgroundColor: F.coral, alignItems: 'center' }}>
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }

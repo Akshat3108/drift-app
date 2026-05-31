@@ -12,50 +12,12 @@
 // no carbon-stamped expenses exist in the window.
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, RefreshControl, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { carbonDashboard, carbonImpactLabel } from '../../../analytics';
 import { palette, potBg } from '../../../theme';
-
-let Svg = null, Rect = null, Line = null, SvgText = null;
-try {
-  const mod = require('react-native-svg');
-  Svg     = mod.Svg     ?? mod.default;
-  Rect    = mod.Rect;
-  Line    = mod.Line;
-  SvgText = mod.Text;
-} catch (_) { /* dev shell */ }
-
-const CHART_PAD = { left: 30, right: 12, top: 14, bottom: 30 };
-
-// Pure layout helper for the monthly bar chart. Exported for /tmp/ validation.
-//   trend: [{ month_key, kg }]
-//   returns { bars: [{ x, y, w, h, label, kg }], yMax, padding }
-export function barLayout(trend, width, height, opts = {}) {
-  const pad = opts.padding ?? CHART_PAD;
-  const usableW = width - pad.left - pad.right;
-  const usableH = height - pad.top - pad.bottom;
-  const slots = trend.length || 1;
-  const yMax = Math.max(0.1, ...trend.map((m) => m.kg || 0)) * 1.1;
-  const slotW = usableW / slots;
-  const barW = Math.max(4, slotW * 0.6);
-
-  const bars = trend.map((m, i) => {
-    const cx = pad.left + slotW * (i + 0.5);
-    const h = m.kg > 0 ? (m.kg / yMax) * usableH : 0;
-    return {
-      x: cx - barW / 2,
-      y: pad.top + usableH - h,
-      w: barW,
-      h,
-      label: m.month_key.slice(5),  // 'MM'
-      monthKey: m.month_key,
-      kg: m.kg,
-    };
-  });
-  return { bars, yMax, padding: pad, usableH };
-}
+import TrendChart from '@components/charts/TrendChart';
 
 function fmtKg(kg) {
   if (kg == null || !Number.isFinite(kg)) return '0 kg';
@@ -84,14 +46,6 @@ function CarbonDashboard({ navigation }) {
   }, [load]);
 
   const pal = useMemo(() => palette(F), [F]);
-  const winW = Dimensions.get('window').width;
-  const chartW = Math.max(280, winW - 32);
-  const chartH = 180;
-  const layout = useMemo(
-    () => (data ? barLayout(data.monthlyTrend, chartW, chartH) : null),
-    [data, chartW, chartH],
-  );
-
   const trackingOff = !settings?.carbon_tracking;
 
   return (
@@ -160,46 +114,20 @@ function CarbonDashboard({ navigation }) {
           </View>
 
           {/* ── Monthly trend ─────────────────────────────────── */}
-          {layout && (
+          {data.monthlyTrend?.length > 0 && (
             <View style={{ marginTop: 14, padding: 12, backgroundColor: F.surface, borderRadius: 18, borderWidth: 1, borderColor: F.line }}>
               <Text style={{ fontSize: 12, color: F.ink3, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
                 Monthly kg CO₂
               </Text>
-              {Svg ? (
-                <Svg width={chartW} height={chartH}>
-                  <SvgText x={4} y={CHART_PAD.top + 4} fontSize="10" fill={F.ink3}>
-                    {fmtKg(layout.yMax)}
-                  </SvgText>
-                  <SvgText x={4} y={chartH - CHART_PAD.bottom + 10} fontSize="10" fill={F.ink3}>0</SvgText>
-                  <Line
-                    x1={CHART_PAD.left} y1={chartH - CHART_PAD.bottom}
-                    x2={chartW - CHART_PAD.right} y2={chartH - CHART_PAD.bottom}
-                    stroke={F.line} strokeWidth={1}/>
-                  {layout.bars.map((b, i) => (
-                    b.h > 0 && (
-                      <Rect key={`bar-${i}`} x={b.x} y={b.y} width={b.w} height={b.h}
-                        fill={F.coral} opacity={0.85} rx={2}/>
-                    )
-                  ))}
-                  {layout.bars.map((b, i) => (
-                    (i % 3 === 0 || i === layout.bars.length - 1) && (
-                      <SvgText key={`x-${i}`} x={b.x + b.w / 2}
-                        y={chartH - 8} fontSize="9" fill={F.ink3} textAnchor="middle">
-                        {b.label}
-                      </SvgText>
-                    )
-                  ))}
-                </Svg>
-              ) : (
-                <View>
-                  {layout.bars.map((b) => (
-                    <View key={b.monthKey} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                      <Text style={{ color: F.ink2 }}>{b.monthKey}</Text>
-                      <Text style={{ color: F.ink }}>{fmtKg(b.kg)}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
+              <TrendChart
+                chartId="carbon.monthly"
+                series={data.monthlyTrend.map((m) => ({ value: m.kg, label: m.month_key.slice(5), key: m.month_key }))}
+                allow={['bar', 'line', 'area', 'dot']}
+                defaultType="bar"
+                height={170}
+                color={F.coral}
+                formatValue={fmtKg}
+              />
             </View>
           )}
 

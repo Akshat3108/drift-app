@@ -5,6 +5,7 @@ import { useApp } from '../../../hooks/useAppState';
 import { useExpenses } from '@features/expenses/context';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { ProgressBar } from '@components/primitives/ProgressBar';
+import TrendChart from '@components/charts/TrendChart';
 import CategoryRow from '@features/trends/components/CategoryRow';
 import { palette } from '../../../theme';
 import { withProfiler } from '@core/utils/perf';
@@ -114,8 +115,13 @@ function Trends({ navigation }) {
     return () => { cancelled = true; };
   }, [anchorMonth]);
 
-  // Bar chart layout calcs.
-  const maxBar = trend.length ? Math.max(1, ...trend.map((d) => d.v)) : 1;
+  // Trend chart series + comparison anchors. The month-trend bars/line/area/dot
+  // are now rendered by the shared TrendChart (selection + YoY anchor stay
+  // controlled here so the header delta + callout below keep working).
+  const trendSeries = useMemo(
+    () => trend.map((d) => ({ value: d.v, label: d.m, key: d.key })),
+    [trend]
+  );
   const prevMonth = trend.length >= 2 ? trend[trend.length - 2] : null;
   const thisMonth = trend.length ? trend[trend.length - 1] : null;
 
@@ -290,40 +296,20 @@ function Trends({ navigation }) {
             </View>
           )}
 
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: trend.length > 12 ? 3 : 8, height: 100 }}>
-            {trend.map((d, i) => {
-              const barH = (d.v / maxBar) * 84;
-              const isSelected = selectedMonth === i;
-              // Highlight the YoY anchor bar in MoM/YoY so the comparison is visually obvious.
-              const isAnchor = anchorMonth && d.key === anchorMonth;
-              return (
-                <TouchableOpacity
-                  key={d.key || i}
-                  onPress={() => setSelectedMonth(i)}
-                  activeOpacity={0.75}
-                  style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: 100 }}
-                >
-                  {isSelected && (
-                    <Text style={{ fontSize: 9, color: F.coral, fontWeight: '700', marginBottom: 3 }}>
-                      {sym}{(d.v / 1000).toFixed(1)}k
-                    </Text>
-                  )}
-                  <View style={{
-                    width: '100%', height: barH,
-                    borderRadius: trend.length > 12 ? 2 : 6,
-                    backgroundColor: isSelected ? F.coral : isAnchor ? F.sageD : F.blushD,
-                    opacity: isSelected ? 1 : isAnchor ? 0.85 : 0.4,
-                  }}/>
-                  {trend.length <= 12 && (
-                    <Text style={{ fontSize: 10, color: isSelected ? F.coral : F.ink3,
-                      marginTop: 5, fontWeight: isSelected ? '700' : '400' }}>
-                      {d.m}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <TrendChart
+            chartId="trends.monthTrend"
+            series={trendSeries}
+            allow={['bar', 'line', 'area', 'dot']}
+            defaultType="bar"
+            height={120}
+            color={F.coral}
+            highlightColor={F.sageD}
+            highlightKey={anchorMonth}
+            selectedIndex={selectedMonth}
+            onSelectIndex={(i) => setSelectedMonth(i)}
+            showInspectLabel={false}
+            formatValue={(v) => `${sym}${Math.round(v).toLocaleString()}`}
+          />
           {trend.length > 12 && (
             <Text style={{ fontSize: 10, color: F.ink3, textAlign: 'center', marginTop: 6 }}>
               {trend[0]?.full} → {trend[trend.length - 1]?.full}

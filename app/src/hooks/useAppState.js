@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { resetAll } from '../db';
 import { ThemeProvider, useTheme } from '@core/theme/ThemeContext';
+import { resolveAccent } from '../theme/accent';
 import { RefreshBusProvider, useRefreshBus } from '@core/state/RefreshBus';
 import { NotifyBusProvider } from '@core/state/NotifyBus';
 import { queryCache } from '@core/state/useQuery';
@@ -35,8 +36,9 @@ import { NotificationsProvider, useNotifications } from '@features/notifications
 //    consumers can also read privacy state if needed.
 function ThemedChildren({ children }) {
   const { settings } = useSettings();
+  // PS-49 — overlay the user-picked accent (named key or hex) on the theme.
   return (
-    <ThemeProvider dark={!!settings.dark_mode}>
+    <ThemeProvider dark={!!settings.dark_mode} accent={resolveAccent(settings.accent_color)}>
       <PrivacyProvider>{children}</PrivacyProvider>
     </ThemeProvider>
   );

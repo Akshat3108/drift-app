@@ -7,8 +7,12 @@
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { potBg } from '../../../theme';
+import { pickReceiptUri } from '@features/expenses/receiptUri';
+import { DriftImage } from '@components/DriftImage';
 
-function PotExpenseRow({ expense, F, sym, pot, isFirst, isLast, onPress }) {
+function PotExpenseRow({ expense, F, sym, pot, isFirst, isLast, showThumb, onPress }) {
+  // PS-46 — opt-in receipt thumbnail in place of the pot emoji.
+  const thumbUri = showThumb ? pickReceiptUri(expense).thumb : null;
   // 8.2 — per-row card-edge borders matching ExpenseRow's pattern. Mirrors
   // PotDetail's original wrapped-card visual (borderRadius: 20).
   return (
@@ -31,9 +35,14 @@ function PotExpenseRow({ expense, F, sym, pot, isFirst, isLast, onPress }) {
       <View style={{
         width: 44, height: 44, borderRadius: 14,
         backgroundColor: potBg(F, pot.color),
-        alignItems: 'center', justifyContent: 'center',
+        alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
       }}>
-        <Text style={{ fontSize: 20 }}>{pot.emoji}</Text>
+        {thumbUri ? (
+          <DriftImage source={{ uri: thumbUri }} recyclingKey={thumbUri}
+            style={{ width: 44, height: 44, borderRadius: 14 }} />
+        ) : (
+          <Text style={{ fontSize: 20 }}>{pot.emoji}</Text>
+        )}
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 15, fontWeight: '600', color: F.ink }}>{expense.merchant}</Text>

@@ -1529,6 +1529,45 @@ ALTER TABLE expenses ADD COLUMN expense_time TEXT NULL;
 ALTER TABLE settings ADD COLUMN capture_expense_time INTEGER NOT NULL DEFAULT 0;
 `;
 
+// v51 — post_187_supplement_v2 Wave-1 settings batch. Seven additive ALTERs,
+// all on `settings`. Scoped to the three schema-touching Wave-1 tasks:
+//   PS-41 — per-channel notification preferences. Five booleans, each gating
+//           one checker family in `features/notifications/checkers.js`. The
+//           existing `notifications_enabled` master ANDs over these; per-channel
+//           flags default 1 so existing installs keep firing every channel:
+//             notif_budget_enabled   → evaluateBudgetThresholds
+//             notif_sub_enabled      → evaluateSubsDue + evaluateInsuranceRenewals
+//             notif_price_enabled    → evaluatePriceAlerts
+//             notif_lowstock_enabled → evaluatePantryLowStock
+//             notif_health_enabled   → reserved (no health-score notif exists yet)
+//           (evaluateHoldingsNavReminder stays master-only — not one of the 5.)
+//   PS-49 — `accent_color TEXT NULL`. Named-palette enum or 7-char hex; NULL =
+//           the default F.coral accent (no UX change for existing installs).
+//   PS-46 — `show_receipt_thumbnails INTEGER` opt-in (default 0) — renders a
+//           32px receipt thumbnail in expense rows when ON.
+// Remaining columns from the supplement's v50 manifest stay deferred until
+// their tasks (PS-27..PS-50, minus this Wave-1 slice) are separately approved.
+const V51_SQL = `
+ALTER TABLE settings ADD COLUMN notif_budget_enabled   INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN notif_sub_enabled      INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN notif_price_enabled    INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN notif_lowstock_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN notif_health_enabled   INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN accent_color           TEXT NULL;
+ALTER TABLE settings ADD COLUMN show_receipt_thumbnails INTEGER NOT NULL DEFAULT 0;
+`;
+
+// v52 — chart-type preferences. One JSON-map column (`chart_prefs`) holds a
+// { "<chartId>": "<type>" } dictionary so every analytics chart can remember
+// its last-chosen rendering (bar / line / area / dot / donut) per surface.
+// A single column instead of one-per-chart keeps the schema flat and lets new
+// charts opt in with zero further migrations. Defaults to '{}' so existing
+// installs render their charts in each chart's hard-coded default until the
+// user picks a different style.
+const V52_SQL = `
+ALTER TABLE settings ADD COLUMN chart_prefs TEXT NOT NULL DEFAULT '{}';
+`;
+
 // v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
 // vehicle, identified by the tag_id printed on the sticker). `current_balance`
 // is the last-known wallet balance from a recharge / CSV import / manual
@@ -1864,6 +1903,16 @@ export const migrations = [
     version: 50,
     name: 'expense-time',
     up: async (db) => { await db.execAsync(V50_SQL); },
+  },
+  {
+    version: 51,
+    name: 'wave1-settings',
+    up: async (db) => { await db.execAsync(V51_SQL); },
+  },
+  {
+    version: 52,
+    name: 'chart-prefs',
+    up: async (db) => { await db.execAsync(V52_SQL); },
   },
 ];
 

@@ -358,12 +358,25 @@ function Profile({ navigation }) {
           }/>
         <Row icon={settings.dark_mode ? '🌙' : '☀️'} label="Dark mode" sub="Toggle light/dark" F={F}
           right={<Toggle value={!!settings.dark_mode} onChange={v => setSetting('dark_mode', v ? 1 : 0)} F={F}/>}/>
+        {/* PS-49 — accent colour picker. */}
+        <Row icon="🎨" label="Theme" sub="Pick an accent colour" F={F}
+          onPress={() => navigation.navigate('EditTheme')}
+          right={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: F.coral }} />
+              <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
+            </View>
+          }/>
         <Row icon="🌱" label="Carbon tracking" sub="CO₂ estimate per expense" F={F}
           right={<Toggle value={!!settings.carbon_tracking} onChange={v => setSetting('carbon_tracking', v ? 1 : 0)} F={F}/>}/>
         {/* PS-25 — Opt-in `expense_time` capture for the hour-of-day heatmap. */}
         <Row icon="🕐" label="Capture expense time" sub="Stamp HH:MM on new entries" F={F}
           right={<Toggle value={!!settings.capture_expense_time}
                          onChange={v => setSetting('capture_expense_time', v ? 1 : 0)} F={F}/>}/>
+        {/* PS-46 — Opt-in receipt thumbnails in expense lists. */}
+        <Row icon="🖼️" label="Receipt thumbnails" sub="Show receipt image in expense rows" F={F}
+          right={<Toggle value={!!settings.show_receipt_thumbnails}
+                         onChange={v => setSetting('show_receipt_thumbnails', v ? 1 : 0)} F={F}/>}/>
       </View>
 
       <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
@@ -422,6 +435,23 @@ function Profile({ navigation }) {
                   })}
                 </View>
               }/>
+            {/* PS-41 — per-channel toggles. The master switch above ANDs over
+                these; turning a channel off suppresses only its notifications. */}
+            <Row icon="📊" label="Budget alerts" sub="Category over-budget warnings" F={F}
+              right={<Toggle value={!!settings.notif_budget_enabled}
+                onChange={v => setSetting('notif_budget_enabled', v ? 1 : 0)} F={F}/>}/>
+            <Row icon="⏰" label="Bill reminders" sub="Subscriptions & insurance renewals" F={F}
+              right={<Toggle value={!!settings.notif_sub_enabled}
+                onChange={v => setSetting('notif_sub_enabled', v ? 1 : 0)} F={F}/>}/>
+            <Row icon="🔔" label="Price alerts" sub="Tracked-item price jumps" F={F}
+              right={<Toggle value={!!settings.notif_price_enabled}
+                onChange={v => setSetting('notif_price_enabled', v ? 1 : 0)} F={F}/>}/>
+            <Row icon="🥗" label="Low-stock alerts" sub="Pantry items running low" F={F}
+              right={<Toggle value={!!settings.notif_lowstock_enabled}
+                onChange={v => setSetting('notif_lowstock_enabled', v ? 1 : 0)} F={F}/>}/>
+            <Row icon="✿" label="Financial-health nudges" sub="Health-score reminders" F={F}
+              right={<Toggle value={!!settings.notif_health_enabled}
+                onChange={v => setSetting('notif_health_enabled', v ? 1 : 0)} F={F}/>}/>
           </>
         )}
       </View>

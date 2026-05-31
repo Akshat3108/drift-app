@@ -10,21 +10,12 @@
 // risers/fallers cards still work.
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { inflationBasket } from '../../../analytics';
 import { all } from '../../../db';
-
-let Svg = null, Path = null, Line = null, Circle = null, SvgText = null;
-try {
-  const mod = require('react-native-svg');
-  Svg     = mod.Svg     ?? mod.default;
-  Path    = mod.Path;
-  Line    = mod.Line;
-  Circle  = mod.Circle;
-  SvgText = mod.Text;
-} catch (_) { /* dev shell — chart falls back to empty state */ }
+import TrendChart from '@components/charts/TrendChart';
 
 const MONTHS_ABBREV = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -121,28 +112,6 @@ function InflationIndex({ navigation }) {
   const latestIndex = monthly.length ? monthly[monthly.length - 1].index : null;
   const indexPct = latestIndex != null ? (latestIndex - 1) * 100 : null;
 
-  // Chart layout
-  const screenWidth = Dimensions.get('window').width;
-  const CHART_W = screenWidth - 32 - 36; // 16px outer + 18px inner card padding × 2
-  const CHART_H = 160;
-  const PAD = { top: 16, right: 12, bottom: 28, left: 36 };
-
-  const linePoints = useMemo(() => {
-    if (monthly.length < 2) return null;
-    const min = Math.min(1.0, ...monthly.map((m) => m.index));
-    const max = Math.max(1.0, ...monthly.map((m) => m.index));
-    const range = Math.max(0.05, max - min);
-    const xStep = (CHART_W - PAD.left - PAD.right) / Math.max(1, monthly.length - 1);
-    const yScale = (v) => PAD.top + (CHART_H - PAD.top - PAD.bottom) * (1 - (v - min) / range);
-    const pts = monthly.map((m, i) => ({
-      x: PAD.left + i * xStep,
-      y: yScale(m.index),
-      data: m,
-    }));
-    const baseY = yScale(1.0);
-    return { pts, baseY, min, max };
-  }, [monthly, CHART_W]);
-
   return (
     <ScrollView style={{ flex: 1, backgroundColor: F.bg }}
       contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
@@ -211,63 +180,27 @@ function InflationIndex({ navigation }) {
               </View>
             )}
 
-            {Svg && Path && linePoints ? (
-              <View>
-                <Svg width={CHART_W} height={CHART_H}>
-                  {/* Base = 1.00 reference */}
-                  <Line x1={PAD.left} y1={linePoints.baseY}
-                        x2={CHART_W - PAD.right} y2={linePoints.baseY}
-                        stroke={F.ink3} strokeWidth="1" strokeDasharray="3,3"/>
-                  <SvgText x={PAD.left - 4} y={linePoints.baseY + 3}
-                    fontSize="9" fill={F.ink3} textAnchor="end">1.00</SvgText>
-
-                  {/* Path */}
-                  <Path
-                    d={linePoints.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')}
-                    stroke={F.coral} strokeWidth="2" fill="none"/>
-
-                  {/* Dots — selected one larger + coral, others smaller + faded */}
-                  {linePoints.pts.map((p, i) => {
-                    const sel = selectedIdx === i;
-                    return (
-                      <Circle key={i} cx={p.x} cy={p.y}
-                        r={sel ? 5 : 3}
-                        fill={sel ? F.coral : F.surface}
-                        stroke={F.coral} strokeWidth={sel ? 2 : 1.5}/>
-                    );
-                  })}
-                </Svg>
-
-                {/* Touch-overlay row — each cell mirrors a chart point. */}
-                <View style={{ position: 'absolute', left: PAD.left, right: PAD.right,
-                  top: 0, bottom: PAD.bottom,
-                  flexDirection: 'row' }}>
-                  {monthly.map((_, i) => (
-                    <TouchableOpacity key={i}
-                      onPress={() => setSelectedIdx(i)}
-                      activeOpacity={0.4}
-                      style={{ flex: 1 }}/>
-                  ))}
-                </View>
-
-                {/* X-axis labels (sparse if > 8 months) */}
-                <View style={{ flexDirection: 'row', marginTop: 4,
-                  paddingLeft: PAD.left, paddingRight: PAD.right }}>
-                  {monthly.map((m, i) => {
-                    const sparse = monthly.length > 8;
-                    const show = !sparse || i % Math.ceil(monthly.length / 6) === 0 || i === monthly.length - 1;
-                    return (
-                      <Text key={m.month_key} style={{ flex: 1, fontSize: 9, color: F.ink3, textAlign: 'center' }}>
-                        {show ? monthLabel(m.month_key).slice(0, 3) : ''}
-                      </Text>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : (
+            {monthly.length < 2 ? (
               <Text style={{ textAlign: 'center', color: F.ink3, padding: 24 }}>
-                {monthly.length < 2 ? 'Need ≥ 2 months for a chart.' : 'Rebuild needed for SVG chart.'}
+                Need ≥ 2 months for a chart.
               </Text>
+            ) : (
+              <TrendChart
+                chartId="inflation.index"
+                series={monthly.map((m) => ({
+                  value: m.index, label: monthLabel(m.month_key).slice(0, 3), key: m.month_key,
+                }))}
+                allow={['line', 'area', 'bar', 'dot']}
+                defaultType="line"
+                height={170}
+                zeroBased={false}
+                color={F.coral}
+                refLine={{ value: 1.0, label: '1.00' }}
+                selectedIndex={selectedIdx}
+                onSelectIndex={(i) => setSelectedIdx(i)}
+                showInspectLabel={false}
+                formatValue={(v) => Number(v).toFixed(3)}
+              />
             )}
           </View>
 

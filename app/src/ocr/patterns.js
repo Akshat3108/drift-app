@@ -162,7 +162,18 @@ export const TOTAL_KEYWORDS = [
   // generic totalPriority prefers 'rounded off' when both are present.
   'net\\s*invoice\\s*amount',
   'rounded\\s*off',
+  // SUPERMART / departmental thermal printers label the final figure as
+  // "AMT TO PAY 107.00" — the `amount\s*to\s*pay` form above doesn't match
+  // the abbreviated AMT spelling, so it would fall through to bare 'total'
+  // (and miss receipts that don't print Total again on its own row).
+  'am[t]\\.?\\s*to\\s*pay',
   'total',
+  // "NET" immediately followed by a currency symbol or digit — covers
+  // sabzi-mandi printers that put the rupee glyph adjacent to the value
+  // ("NET ₹70.00") instead of the "NET Rs." form already in the list.
+  // Lookahead is necessary so "Net Bag 250" (a product) doesn't classify
+  // as total — the lookahead requires ₹/$ or a digit directly after NET.
+  'net(?=\\s*[₹$\\d])',
 ];
 
 export const SUBTOTAL_KEYWORDS = [
@@ -213,6 +224,10 @@ export const FEE_KEYWORDS = [
   'surcharge',
   'fuel\\s*surcharge',
   'cover\\s*charge',
+  // Sabzi-mandi / departmental thermal printers print "ROUND OFF 0.22" as
+  // a separate row (without the -ed in 'Rounded Off'). Classify as a fee so
+  // the small adjustment doesn't get promoted to an item.
+  'round\\s*off',
 ];
 
 export const DISCOUNT_KEYWORDS = [
@@ -319,6 +334,15 @@ export const BILL_HEADER_KEYWORDS = [
   'order\\s*summary',
   'invoice\\s*details',
   'tax\\s*invoice',
+  // Tabular column-header rows on departmental / mandi / restaurant
+  // receipts. Without these, a bare-amount subtotal row (e.g. "69.78" on
+  // its own) finds the column header via findNameBackward and adopts
+  // "ITEM NAME QTY/WT @RATE AMT" as its item name. Anchored phrases
+  // (multi-word column labels) so they don't bleed into real item names.
+  'item\\s+name',
+  'qty\\s*\\/\\s*wt',
+  'our\\s+price',
+  's\\.?\\s*n\\.?\\s+description',
 ];
 
 // ── Item-line patterns ─────────────────────────────────────────────────────
@@ -463,17 +487,25 @@ export const FORMAT_SIGNATURES = [
   {
     format: 'mandi',
     label: 'Mandi / Wholesale produce',
-    // Sabzi-mandi and wholesale-produce printers use a recognisable column
-    // header — "ITEM NAME QTY/WT @RATE AMT Rs." — and weight-priced rows
-    // (qty in kg, 3 decimals) with NET Rs. at the bottom. Distinguishing
-    // them from departmental matters because the item extractor needs to
-    // treat the decimal qty column as a weight (kg), not a count.
+    // Sabzi-mandi / wholesale-produce printers — recognisable by the header
+    // "ITEM NAME  QTY/WT  [@]RATE  AMT (Rs.|₹)", weight-priced item rows
+    // (qty in kg, 3 decimals), and a NET (Rs.|₹) footer. The `@` before
+    // RATE and the `Rs.` after AMT/NET are printer-specific — some templates
+    // print neither, just `RATE` and `AMT ₹`. Signatures below tolerate
+    // both. Format matters because the item extractor must treat the qty
+    // column as a kg-weight, not a piece-count.
     tests: [
       /\bqty\s*\/\s*wt\b/i,
-      /@\s*rate\b/i,
-      /\bamt\s+rs\.?/i,
-      /\bnet\s+rs\.?/i,
       /\bitem\s+name\b/i,
+      // Header amt column — accept Rs./₹/INR (printer-specific).
+      /\bamt\s*(?:rs\.?|₹|inr)/i,
+      // Footer total — "NET Rs." / "NET ₹" / "NET 70.00".
+      /\bnet\s*(?:rs\.?|₹|inr|\d)/i,
+      // Data-driven: at least one produce row of shape
+      //   "<alpha-name>  <kg>  <rate>  <amount>"
+      // where kg has 3 decimals. Multi-line via /m. This catches sabzi-mandi
+      // receipts when the header is OCR'd badly but the body is clean.
+      /^[^\d\n]{2,30}\s+\d\.\d{3}\s+\d+(?:\.\d{1,2})?\s+\d+\.\d{2}\s*$/m,
     ],
   },
   {
@@ -486,6 +518,16 @@ export const FORMAT_SIGNATURES = [
       /\bmrp\b.*\bnet\s*payable\b/is,
       /\bcashier\b/i,
       /\bloyalty\b/i,
+      // Brand-agnostic departmental signals — Posiflex/Wep thermal
+      // templates used by SUPERMART, DMart Ready, Spencer's Daily, etc.
+      // "RETAIL INVOICE" header and an "OUR PRICE" column are highly
+      // diagnostic — almost no other format prints them.
+      /\bretail\s+invoice\b/i,
+      /\bour\s+price\b/i,
+      // 8+ digit bill number — departmental POS bill ids are long
+      // (SUPERMART 2627004463, DMart 130100...). Restaurants/cafés use
+      // short bill ids (3-5 digits).
+      /\bbill\s*no\.?\s*\d{8,}\b/i,
     ],
   },
   {

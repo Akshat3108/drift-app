@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { ProgressBar } from '@components/primitives/ProgressBar';
 import GoalRow from '@features/goals/components/GoalRow';
+import { goals as goalRepo } from '@features/goals/repo';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
 
@@ -16,6 +17,21 @@ function Goals({ navigation }) {
 
   const [contribFor, setContribFor] = useState(null);
   const [contribAmt, setContribAmt] = useState('');
+
+  // PS-44 — per-goal projected ETA + velocity. Recomputed whenever `goals`
+  // changes (e.g. after a contribution refreshes the slice). Keyed by goal id;
+  // a null entry means "not enough history to project" → GoalRow hides it.
+  const [projections, setProjections] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        goals.map(async (g) => [g.id, await goalRepo.projectedEta(g.id)])
+      );
+      if (!cancelled) setProjections(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [goals]);
 
   const colors = [F.coral, F.sageD, F.sky2, '#9d8fc8'];
   const bgs    = [F.cream, F.mint, F.sky, F.lilac];
@@ -108,6 +124,7 @@ function Goals({ navigation }) {
             sym={sym}
             bg={bgs[i % 4]}
             color={colors[i % 4]}
+            projection={projections[g.id]}
             onPress={handleRowPress}
             onLongPress={handleLongPress}
           />

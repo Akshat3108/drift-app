@@ -13,6 +13,16 @@ const DEFAULTS = {
   privacy_hide_on_minimize: 0,
   privacy_mask_amounts_always: 0,
   capture_expense_time: 0,
+  // v51 — Wave-1 settings batch
+  notif_budget_enabled: 1,
+  notif_sub_enabled: 1,
+  notif_price_enabled: 1,
+  notif_lowstock_enabled: 1,
+  notif_health_enabled: 1,
+  accent_color: null,
+  show_receipt_thumbnails: 0,
+  // v52 — per-chart rendering preferences, JSON map { "<chartId>": "<type>" }.
+  chart_prefs: '{}',
 };
 
 export const settings = {
@@ -29,8 +39,11 @@ export const settings = {
                              app_lock_enabled,
                              privacy_block_screenshots, privacy_hide_on_minimize,
                              privacy_mask_amounts_always,
-                             capture_expense_time)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             capture_expense_time,
+                             notif_budget_enabled, notif_sub_enabled, notif_price_enabled,
+                             notif_lowstock_enabled, notif_health_enabled,
+                             accent_color, show_receipt_thumbnails, chart_prefs)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          currency               = excluded.currency,
          dark_mode              = excluded.dark_mode,
@@ -43,7 +56,15 @@ export const settings = {
          privacy_block_screenshots   = excluded.privacy_block_screenshots,
          privacy_hide_on_minimize    = excluded.privacy_hide_on_minimize,
          privacy_mask_amounts_always = excluded.privacy_mask_amounts_always,
-         capture_expense_time   = excluded.capture_expense_time`,
+         capture_expense_time   = excluded.capture_expense_time,
+         notif_budget_enabled    = excluded.notif_budget_enabled,
+         notif_sub_enabled       = excluded.notif_sub_enabled,
+         notif_price_enabled     = excluded.notif_price_enabled,
+         notif_lowstock_enabled  = excluded.notif_lowstock_enabled,
+         notif_health_enabled    = excluded.notif_health_enabled,
+         accent_color            = excluded.accent_color,
+         show_receipt_thumbnails = excluded.show_receipt_thumbnails,
+         chart_prefs             = excluded.chart_prefs`,
       [
         next.currency,
         next.dark_mode ? 1 : 0,
@@ -57,6 +78,14 @@ export const settings = {
         next.privacy_hide_on_minimize ? 1 : 0,
         next.privacy_mask_amounts_always ? 1 : 0,
         next.capture_expense_time ? 1 : 0,
+        next.notif_budget_enabled ? 1 : 0,
+        next.notif_sub_enabled ? 1 : 0,
+        next.notif_price_enabled ? 1 : 0,
+        next.notif_lowstock_enabled ? 1 : 0,
+        next.notif_health_enabled ? 1 : 0,
+        next.accent_color == null ? null : String(next.accent_color),
+        next.show_receipt_thumbnails ? 1 : 0,
+        typeof next.chart_prefs === 'string' ? next.chart_prefs : '{}',
       ]
     );
     return this.get();

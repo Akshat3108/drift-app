@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput, Modal, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput, Modal, Platform, KeyboardAvoidingView } from 'react-native';
 import DriftImage from '@components/DriftImage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -945,7 +945,14 @@ function ItemEditor({ visible, item, F, sym, onClose, onChange, onDelete }) {
   if (!item) return null;
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}
+      >
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
+        >
         <View style={{ backgroundColor: F.bg, padding: 22,
           borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
           <Text style={{ fontSize: 18, color: F.ink, fontWeight: '500', marginBottom: 16 }}>
@@ -1031,7 +1038,8 @@ function ItemEditor({ visible, item, F, sym, onClose, onChange, onDelete }) {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

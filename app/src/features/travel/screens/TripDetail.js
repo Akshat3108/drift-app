@@ -14,23 +14,13 @@
 // are exported for /tmp/ validation.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { CURRENCIES } from '@core/domain/currencies';
 import { potBg } from '../../../theme';
-
-let Svg = null, Rect = null, Line = null, SvgText = null;
-try {
-  const mod = require('react-native-svg');
-  Svg     = mod.Svg     ?? mod.default;
-  Rect    = mod.Rect;
-  Line    = mod.Line;
-  SvgText = mod.Text;
-} catch (_) { /* dev shell */ }
-
-const BAR_PAD = { left: 26, right: 10, top: 14, bottom: 26 };
+import TrendChart from '@components/charts/TrendChart';
 
 // Enumerate every date string (YYYY-MM-DD) between start and end inclusive.
 // Returns [] when start/end are missing or end < start. Pure / null-safe.
@@ -63,29 +53,6 @@ export function dayBucketize(expenses, startDate, endDate) {
     total.set(date, total.get(date) + home);
   }
   return days.map((d) => ({ date: d, total: total.get(d) || 0 }));
-}
-
-export function barLayout(buckets, width, height, opts = {}) {
-  const pad = opts.padding ?? BAR_PAD;
-  const usableW = width - pad.left - pad.right;
-  const usableH = height - pad.top - pad.bottom;
-  const slots = buckets.length || 1;
-  const yMax = Math.max(1, ...buckets.map((b) => b.total || 0)) * 1.1;
-  const slotW = usableW / slots;
-  const barW = Math.max(2, slotW * 0.6);
-  const bars = buckets.map((b, i) => {
-    const cx = pad.left + slotW * (i + 0.5);
-    const h = b.total > 0 ? (b.total / yMax) * usableH : 0;
-    return {
-      x: cx - barW / 2,
-      y: pad.top + usableH - h,
-      w: barW, h,
-      date: b.date,
-      label: b.date.slice(8, 10),
-      total: b.total,
-    };
-  });
-  return { bars, yMax, padding: pad, usableH };
 }
 
 function fmtMoney(sym, n) {
@@ -142,14 +109,6 @@ function TripDetail({ route, navigation }) {
   const buckets = useMemo(
     () => trip ? dayBucketize(tripExpenses, trip.start_date, trip.end_date) : [],
     [trip, tripExpenses],
-  );
-
-  const winW = Dimensions.get('window').width;
-  const chartW = Math.max(280, winW - 32);
-  const chartH = 160;
-  const layout = useMemo(
-    () => (buckets.length ? barLayout(buckets, chartW, chartH) : null),
-    [buckets, chartW, chartH],
   );
 
   if (!trip) {
@@ -235,42 +194,15 @@ function TripDetail({ route, navigation }) {
           <Text style={{ fontSize: 11, color: F.ink3, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
             Spend per day
           </Text>
-          {Svg && layout ? (
-            <Svg width={chartW} height={chartH}>
-              <SvgText x={4} y={BAR_PAD.top + 4} fontSize="9" fill={F.ink3}>
-                {fmtMoney(homeSym, layout.yMax)}
-              </SvgText>
-              <SvgText x={4} y={chartH - BAR_PAD.bottom + 10} fontSize="9" fill={F.ink3}>0</SvgText>
-              <Line
-                x1={BAR_PAD.left} y1={chartH - BAR_PAD.bottom}
-                x2={chartW - BAR_PAD.right} y2={chartH - BAR_PAD.bottom}
-                stroke={F.line} strokeWidth={1}/>
-              {layout.bars.map((b, i) => (
-                b.h > 0 && (
-                  <Rect key={`bar-${i}`} x={b.x} y={b.y} width={b.w} height={b.h}
-                    fill={F.coral} opacity={0.85} rx={2}/>
-                )
-              ))}
-              {layout.bars.map((b, i) => {
-                const step = Math.max(1, Math.floor(layout.bars.length / 6));
-                return (i % step === 0 || i === layout.bars.length - 1) && (
-                  <SvgText key={`x-${i}`} x={b.x + b.w / 2}
-                    y={chartH - 8} fontSize="9" fill={F.ink3} textAnchor="middle">
-                    {b.label}
-                  </SvgText>
-                );
-              })}
-            </Svg>
-          ) : (
-            <View>
-              {buckets.map((b) => (
-                <View key={b.date} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
-                  <Text style={{ color: F.ink2 }}>{b.date}</Text>
-                  <Text style={{ color: F.ink }}>{fmtMoney(homeSym, b.total)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
+          <TrendChart
+            chartId="trip.daily"
+            series={buckets.map((b) => ({ value: b.total, label: b.date.slice(8, 10), key: b.date }))}
+            allow={['bar', 'line', 'area', 'dot']}
+            defaultType="bar"
+            height={150}
+            color={F.coral}
+            formatValue={(v) => fmtMoney(homeSym, v)}
+          />
         </View>
       )}
 

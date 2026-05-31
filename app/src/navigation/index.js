@@ -48,6 +48,8 @@ import GoalsScreen       from '@features/goals/screens/Goals';
 import ProfileScreen     from '@features/profile/screens/Profile';
 import DiagnosticsScreen from '@features/profile/screens/Diagnostics';
 import ExportScreen      from '@features/profile/screens/Export';
+import EditThemeScreen   from '@features/profile/screens/EditTheme';
+import IncomeBreakdownScreen from '@features/income/screens/IncomeBreakdown';
 import NetWorthScreen    from '@features/accounts/screens/NetWorth';
 import TravelScreen      from '@features/travel/screens/Travel';
 import TripDetailScreen  from '@features/travel/screens/TripDetail';
@@ -123,6 +125,8 @@ const Goals       = withBoundary('Goals',       GoalsScreen);
 const Profile     = withBoundary('Profile',     ProfileScreen);
 const Diagnostics = withBoundary('Diagnostics', DiagnosticsScreen);
 const Export      = withBoundary('Export',      ExportScreen);
+const EditTheme   = withBoundary('EditTheme',   EditThemeScreen);
+const IncomeBreakdown = withBoundary('IncomeBreakdown', IncomeBreakdownScreen);
 const NetWorth    = withBoundary('NetWorth',    NetWorthScreen);
 const Travel      = withBoundary('Travel',      TravelScreen);
 const TripDetail  = withBoundary('TripDetail',  TripDetailScreen);
@@ -228,6 +232,10 @@ export default function Navigation() {
         <Stack.Screen name="Profile"     component={Profile}     options={{ title: 'Profile' }}/>
         <Stack.Screen name="Diagnostics" component={Diagnostics} options={{ title: 'Diagnostics' }}/>
         <Stack.Screen name="Export"      component={Export}      options={{ presentation: 'modal', headerShown: false }}/>
+        {/* PS-49 — accent colour picker. */}
+        <Stack.Screen name="EditTheme"   component={EditTheme}   options={{ title: 'Theme' }}/>
+        {/* PS-43 — income source breakdown. */}
+        <Stack.Screen name="IncomeBreakdown" component={IncomeBreakdown} options={{ title: 'Income mix' }}/>
         <Stack.Screen name="NetWorth"    component={NetWorth}    options={{ title: 'Net Worth' }}/>
         <Stack.Screen name="Travel"      component={Travel}      options={{ title: 'Travel' }}/>
         <Stack.Screen name="TripDetail"  component={TripDetail}  options={{ title: 'Trip detail' }}/>

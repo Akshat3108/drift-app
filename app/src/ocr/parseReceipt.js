@@ -103,6 +103,68 @@ function mergeIntoRows(lines) {
   });
 }
 
+// Two-line item-row coalesce. Departmental thermal templates (SUPERMART /
+// Stop & Shop, DMart Ready, Spencer's Daily, Vishal Mega Mart, …) wrap each
+// item across TWO physical lines: description on row N, then
+// "<qty> <MRP> <our-price> <amt>" directly on row N+1 — y-overlap fails so
+// mergeIntoRows keeps them separate. Without coalescing, the description
+// row gets dropped (no amounts) and the numeric row produces an item with
+// empty/wrong name.
+//
+// Run only when the detected format is `departmental` so other formats
+// don't accidentally swallow a header / fee row into the next item.
+function coalesceTwoLineItems(rows, format) {
+  if (format !== 'departmental') return rows;
+  if (rows.length < 2) return rows;
+
+  const heights = rows.map(r => r.height || 22).filter(h => h > 0);
+  const sortedH = heights.slice().sort((a, b) => a - b);
+  const medianH = sortedH[Math.floor(sortedH.length / 2)] || 22;
+  const maxGap = medianH * 1.5;
+
+  const skip = new Set();
+  const out = rows.slice();
+  for (let i = 1; i < rows.length; i++) {
+    if (skip.has(i - 1) || skip.has(i)) continue;
+    const curr = rows[i];
+    const prev = rows[i - 1];
+    const currAmts = matchAmounts(curr.text);
+    if (currAmts.length < 3) continue;
+    // Current must be predominantly numeric — strip digits + punctuation
+    // and check what's left. Allow up to 5 alpha chars to absorb a leading
+    // S.N integer + a stray "HSN." token (column label inline).
+    const currAlpha = curr.text.replace(/[\d\s.,:%₹$€£¥+\-*\/#()]/g, '');
+    if (currAlpha.length > 5) continue;
+    // Previous must be alpha-bearing with no amount tokens.
+    if (matchAmounts(prev.text).length) continue;
+    if (!/[a-z]/i.test(prev.text)) continue;
+    if (SKIP_RE.test(prev.text)) continue;
+    // looksLikeMetaOnly fires on "<NAME> HSN:" rows because HSN is a META
+    // keyword — strip column-label-meta tokens before the check so a
+    // legitimate item description doesn't get rejected.
+    const prevStrippedForMeta = prev.text.replace(/\b(?:hsn|sac)[:.]?\b/gi, '').trim();
+    if (prevStrippedForMeta && looksLikeMetaOnly(prevStrippedForMeta)) continue;
+    if (BILL_HDR_RE.test(prev.text)) continue;
+    // Avoid pulling in a column-header row ("S.N DESCRIPTION QTY MRP …").
+    if (/\b(?:description|s\.?n\.?|qty|mrp|our\s*price|amt|amount|hsn|sac)\b.*\b(?:description|s\.?n\.?|qty|mrp|our\s*price|amt|amount|hsn|sac)\b/i.test(prev.text)) continue;
+    // Tight vertical gap — protects against pulling in the previous item's
+    // numeric row across a wider gap.
+    const gap = curr.y - (prev.y + (prev.height || medianH));
+    if (gap > maxGap) continue;
+    out[i] = {
+      ...curr,
+      text: `${prev.text} ${curr.text}`.trim(),
+      tokens: [...(prev.tokens || []), ...(curr.tokens || [])],
+      parts: [...(prev.parts || [prev.text]), ...(curr.parts || [curr.text])],
+      y: prev.y,
+      x: Math.min(prev.x ?? curr.x ?? 0, curr.x ?? prev.x ?? 0),
+      height: (curr.y + (curr.height || medianH)) - prev.y,
+    };
+    skip.add(i - 1);
+  }
+  return out.filter((_, i) => !skip.has(i));
+}
+
 // ── Row classification ──────────────────────────────────────────────────────
 // Order matters here — subtotals/totals share the word "total", so we test
 // the more specific keyword set first. See patterns.js for the regexes.
@@ -1270,14 +1332,23 @@ export async function parseReceipt(ocrResultOrLines, options = {}) {
     };
   }
 
-  const rows = mergeIntoRows(rawLines);
+  let rows = mergeIntoRows(rawLines);
   // Yield #1 — row grouping done (heaviest prep stage).
   await yieldFn();
   signal?.throwIfCancelled?.();
-  const fullText = rows.map(r => r.text).join('\n');
 
-  // ── Format ────────────────────────────────────────────────────────────
+  // ── Format (first pass for coalesce decision) ────────────────────────
   let fd = detectFormat(rows);
+  // Two-line departmental item rows: description on row N, numerics on
+  // row N+1. Coalesce before downstream extraction sees the rows.
+  const coalesced = coalesceTwoLineItems(rows, fd.format);
+  if (coalesced !== rows) {
+    rows = coalesced;
+    // Re-detect on coalesced text — extra signals (HSN inline with item
+    // row, etc.) may now fire and bump formatConfidence.
+    fd = detectFormat(rows);
+  }
+  const fullText = rows.map(r => r.text).join('\n');
   if (options.template?.format) {
     // 4.22 — template format override. We keep detectFormat's brand /
     // signal metadata but swap in the learned format + its config. The

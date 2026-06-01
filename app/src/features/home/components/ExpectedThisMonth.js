@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { useTheme } from '@core/theme/ThemeContext';
 import { useSettings } from '@features/profile/settings.context';
 import { useExpenses } from '@features/expenses/context';
+import { autocreateRepo } from '@features/expenses/autocreate.repo';
+import { lightNormMerchant } from '@core/utils/strings';
 import { recurringCandidates } from '../../../analytics';
 
 // 7.11 — "Expected this month" Home tile.
@@ -26,20 +28,47 @@ export default function ExpectedThisMonth({ navigation }) {
   const { sym } = useSettings();
   const { expenses } = useExpenses();
   const [data, setData] = useState(null);
+  // PS-30 — set of merchant_keys the user enabled auto-create for.
+  const [autoKeys, setAutoKeys] = useState(() => new Set());
   const gen = expenses.length; // cheap signal — re-derive when expenses change
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const out = await recurringCandidates({});
-        if (!cancelled) setData(out);
+        const [out, keys] = await Promise.all([
+          recurringCandidates({}),
+          autocreateRepo.enabledKeys().catch(() => new Set()),
+        ]);
+        if (!cancelled) { setData(out); setAutoKeys(keys); }
       } catch {
         if (!cancelled) setData(null);
       }
     })();
     return () => { cancelled = true; };
   }, [gen]);
+
+  // PS-30 — flip auto-create for a pattern, snapshotting its projected
+  // day/amount/category so the maintenance task can fire even if detection
+  // shifts later.
+  const toggleAuto = async (c) => {
+    const key = lightNormMerchant(c.merchant);
+    const on = autoKeys.has(key);
+    try {
+      if (on) await autocreateRepo.disable(c.merchant);
+      else await autocreateRepo.enable({
+        merchant: c.merchant,
+        expected_day: c.expected_day,
+        expected_amount: c.expected_amount,
+        category_id: c.expected_category_id,
+      });
+      setAutoKeys((prev) => {
+        const next = new Set(prev);
+        if (on) next.delete(key); else next.add(key);
+        return next;
+      });
+    } catch { /* best-effort toggle */ }
+  };
 
   if (!data || !data.candidates || data.candidates.length === 0) return null;
 
@@ -67,9 +96,10 @@ export default function ExpectedThisMonth({ navigation }) {
 
       {candidates.map((c) => {
         const logged = c.logged_this_month_id != null;
+        const autoOn = autoKeys.has(lightNormMerchant(c.merchant));
         return (
+          <View key={c.merchant}>
           <TouchableOpacity
-            key={c.merchant}
             onPress={() => {
               if (logged) {
                 navigation?.navigate('Detail', { id: c.logged_this_month_id });
@@ -108,6 +138,20 @@ export default function ExpectedThisMonth({ navigation }) {
               </Text>
             </View>
           </TouchableOpacity>
+          {/* PS-30 — opt this pattern into monthly auto-create. */}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 6 }}>
+            <TouchableOpacity onPress={() => toggleAuto(c)} activeOpacity={0.7}
+              accessibilityRole="switch" accessibilityState={{ checked: autoOn }}
+              accessibilityLabel={`Auto-create ${c.merchant} on day ${c.expected_day}`}
+              style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99,
+                backgroundColor: autoOn ? F.mint : 'transparent',
+                borderWidth: 1, borderColor: autoOn ? F.sageD : F.line }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: autoOn ? F.sageD : F.ink3 }}>
+                {autoOn ? `✓ Auto-create · day ${c.expected_day}` : `Auto-create on day ${c.expected_day}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          </View>
         );
       })}
     </View>

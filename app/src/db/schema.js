@@ -1598,6 +1598,123 @@ CREATE INDEX IF NOT EXISTS idx_items_return_by
   ON receipt_items(return_by_date) WHERE return_by_date IS NOT NULL;
 `;
 
+// v54 — post_187_supplement_v2 Wave-3 schema (PS-29 + PS-30). The other three
+// Wave-3 tasks (PS-33/27/28) are schema-free.
+//   PS-29 — `subscriptions.last_alert_at` dedupes the price-drift notification
+//           to once per change.
+//   PS-30 — `expenses.is_pending` marks auto-created, not-yet-confirmed rows.
+//           A pending row must stay OUT of monthly_summary + expense_fts until
+//           the user confirms it, so we re-create the six expense rollup/FTS
+//           triggers (v12/v13) with an extra `is_pending = 0` gate beside the
+//           existing `deleted_at IS NULL` gate. Confirming a row (is_pending
+//           1->0) makes the AU trigger add it to the rollup — exactly the way
+//           un-soft-deleting does. Dismissing (hard DELETE while is_pending=1)
+//           is a no-op because the AD triggers are now gated too (the row was
+//           never in the rollup/FTS, so we must NOT emit the FTS 'delete'
+//           command for an absent rowid). Item triggers are untouched —
+//           auto-created pending rows are bare (no receipt_items).
+//           `recurring_autocreate` persists the per-merchant opt-in (the only
+//           stable identity recurringCandidates() exposes); `last_created_month`
+//           guards against creating two pending rows for the same pattern in
+//           one month.
+const V54_SQL = `
+ALTER TABLE subscriptions ADD COLUMN last_alert_at TEXT NULL;
+
+ALTER TABLE expenses ADD COLUMN is_pending INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_exp_pending
+  ON expenses(expense_date) WHERE is_pending = 1;
+
+CREATE TABLE IF NOT EXISTS recurring_autocreate (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant           TEXT NOT NULL,
+  merchant_key       TEXT NOT NULL,
+  expected_day       INTEGER,
+  expected_amount    REAL,
+  category_id        INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  enabled            INTEGER NOT NULL DEFAULT 1,
+  last_created_month TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at         TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_autocreate_merchant
+  ON recurring_autocreate(merchant_key) WHERE deleted_at IS NULL;
+
+DROP TRIGGER IF EXISTS trg_exp_ai;
+CREATE TRIGGER trg_exp_ai AFTER INSERT ON expenses
+WHEN NEW.deleted_at IS NULL AND NEW.is_pending = 0
+BEGIN
+  INSERT INTO monthly_summary (month_key, category_id, total, txn_count)
+  VALUES (
+    substr(NEW.expense_date, 1, 7),
+    COALESCE(NEW.category_id, 0),
+    NEW.amount,
+    1
+  )
+  ON CONFLICT (month_key, category_id) DO UPDATE SET
+    total     = monthly_summary.total     + excluded.total,
+    txn_count = monthly_summary.txn_count + excluded.txn_count;
+END;
+
+DROP TRIGGER IF EXISTS trg_exp_ad;
+CREATE TRIGGER trg_exp_ad AFTER DELETE ON expenses
+WHEN OLD.deleted_at IS NULL AND OLD.is_pending = 0
+BEGIN
+  UPDATE monthly_summary
+     SET total     = total - OLD.amount,
+         txn_count = txn_count - 1
+   WHERE month_key   = substr(OLD.expense_date, 1, 7)
+     AND category_id = COALESCE(OLD.category_id, 0);
+END;
+
+DROP TRIGGER IF EXISTS trg_exp_au;
+CREATE TRIGGER trg_exp_au AFTER UPDATE ON expenses
+BEGIN
+  UPDATE monthly_summary
+     SET total     = total - OLD.amount,
+         txn_count = txn_count - 1
+   WHERE OLD.deleted_at IS NULL AND OLD.is_pending = 0
+     AND month_key   = substr(OLD.expense_date, 1, 7)
+     AND category_id = COALESCE(OLD.category_id, 0);
+  INSERT INTO monthly_summary (month_key, category_id, total, txn_count)
+  SELECT
+    substr(NEW.expense_date, 1, 7),
+    COALESCE(NEW.category_id, 0),
+    NEW.amount,
+    1
+  WHERE NEW.deleted_at IS NULL AND NEW.is_pending = 0
+  ON CONFLICT (month_key, category_id) DO UPDATE SET
+    total     = monthly_summary.total     + excluded.total,
+    txn_count = monthly_summary.txn_count + excluded.txn_count;
+END;
+
+DROP TRIGGER IF EXISTS trg_expense_fts_ai;
+CREATE TRIGGER trg_expense_fts_ai AFTER INSERT ON expenses
+WHEN NEW.deleted_at IS NULL AND NEW.is_pending = 0
+BEGIN
+  INSERT INTO expense_fts(rowid, merchant, notes)
+  VALUES (NEW.id, NEW.merchant, COALESCE(NEW.notes, ''));
+END;
+
+DROP TRIGGER IF EXISTS trg_expense_fts_ad;
+CREATE TRIGGER trg_expense_fts_ad AFTER DELETE ON expenses
+WHEN OLD.deleted_at IS NULL AND OLD.is_pending = 0
+BEGIN
+  INSERT INTO expense_fts(expense_fts, rowid, merchant, notes)
+  VALUES ('delete', OLD.id, OLD.merchant, COALESCE(OLD.notes, ''));
+END;
+
+DROP TRIGGER IF EXISTS trg_expense_fts_au;
+CREATE TRIGGER trg_expense_fts_au AFTER UPDATE ON expenses
+BEGIN
+  INSERT INTO expense_fts(expense_fts, rowid, merchant, notes)
+  SELECT 'delete', OLD.id, OLD.merchant, COALESCE(OLD.notes, '')
+  WHERE OLD.deleted_at IS NULL AND OLD.is_pending = 0;
+  INSERT INTO expense_fts(rowid, merchant, notes)
+  SELECT NEW.id, NEW.merchant, COALESCE(NEW.notes, '')
+  WHERE NEW.deleted_at IS NULL AND NEW.is_pending = 0;
+END;
+`;
+
 // v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
 // vehicle, identified by the tag_id printed on the sticker). `current_balance`
 // is the last-known wallet balance from a recharge / CSV import / manual
@@ -1949,6 +2066,11 @@ export const migrations = [
     name: 'lifecycle-refund-ocr-returns',
     up: async (db) => { await db.execAsync(V53_SQL); },
   },
+  {
+    version: 54,
+    name: 'pending-debits-sub-drift',
+    up: async (db) => { await db.execAsync(V54_SQL); },
+  },
 ];
 
 // Tables present after v1 — used by the legacy-stamp detection in runMigrations()
@@ -1982,6 +2104,10 @@ export const TABLES = [
   // SET NULL would tolerate the reverse — keeps the convention consistent
   // with every other category-child table in this list.
   'expense_templates',
+  // PS-30 — recurring_autocreate is a child of categories (FK ON DELETE SET
+  // NULL). Children-first wipe order requires it before `categories`, matching
+  // the expense_templates convention above.
+  'recurring_autocreate',
   'income', 'categories',
   'subscriptions', 'goals',
   // 7.5 — emi_loans is a parent of expenses (expenses.emi_loan_id → emi_loans.id

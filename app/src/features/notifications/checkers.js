@@ -321,6 +321,34 @@ export function evaluatePantryLowStock({ pantry, settings, now = new Date() }) {
   return out;
 }
 
+// PS-29 — Subscription price-change alert.
+//
+// `drifts` is subscriptionDrift()'s output (subs whose last N linked charges
+// average > threshold off the set price). Gated by the PRICE channel — a sub
+// price change is a price alert in spirit. The dedupe key embeds the rounded
+// charged price, so each new price *level* fires once; re-evaluating at the
+// same price collides on the UNIQUE dedupe index and is skipped.
+export function evaluateSubscriptionDrift({ drifts, settings, sym = '₹' }) {
+  if (!settings?.notifications_enabled) return [];
+  if (!chOn(settings?.notif_price_enabled)) return [];   // PS-41 price channel
+  const out = [];
+  for (const d of (drifts || [])) {
+    if (!d || d.sub_id == null) continue;
+    const up = d.delta_amount > 0;
+    const pct = Math.round(Math.abs(d.delta_pct) * 100);
+    const actualRounded = Math.round(d.actual_avg);
+    out.push({
+      dedupe_key: `subdrift:${d.sub_id}:${actualRounded}`,
+      kind: 'sub_price_change',
+      title: `${d.name} price ${up ? 'up' : 'down'} ${pct}%`,
+      body: `Now averaging ${fmtAmount(d.actual_avg, sym)} vs your set ${fmtAmount(d.expected, sym)}.`,
+      payload: { sub_id: d.sub_id, expected: d.expected, actual_avg: d.actual_avg, delta_pct: d.delta_pct },
+      schedule: { type: 'now' },
+    });
+  }
+  return out;
+}
+
 // PS-39 — Return-window closing reminder.
 //
 // One scheduled notification per still-returnable item, fired at 09:00 local

@@ -90,7 +90,10 @@ function inPlaceholders(n) { return Array(n).fill('?').join(', '); }
 export function buildWhere(rawCriteria, { tableAlias = 'e' } = {}) {
   const c = normalizeCriteria(rawCriteria);
   const E = tableAlias;
-  const frags = [`${E}.deleted_at IS NULL`];
+  // PS-30 — exclude pending (auto-created, unconfirmed) rows from every
+  // filtered surface (list / count / search / export) in one place, alongside
+  // soft-deleted rows.
+  const frags = [`${E}.deleted_at IS NULL`, `${E}.is_pending = 0`];
   const params = [];
 
   if (c.categoryIds && c.categoryIds.length) {

@@ -171,6 +171,17 @@ export function ExpensesProvider({ children }) {
     return n;
   }, [refresh]);
 
+  // PS-30 — confirm flips a pending row to live (refresh so it enters the feed
+  // + summary). Dismiss hard-deletes (it was never in the feed, so no refresh).
+  const confirmPending = useCallback(async (id) => {
+    await expRepo.confirmPending(id);
+    await refresh();
+  }, [refresh]);
+
+  const dismissPending = useCallback(async (id) => {
+    await expRepo.dismissPending(id);
+  }, []);
+
   const addExpenseWithItems = useCallback(async ({ expense, items }) => {
     // 7.3 — tags come through on the expense slice; pull them out before
     // createWithItems writes the row (its INSERT doesn't know about tags).
@@ -233,6 +244,10 @@ export function ExpensesProvider({ children }) {
     addExpense, updateExpense, removeExpense, restoreExpense,
     bulkRemoveExpenses, bulkRestoreExpenses, bulkRecategorizeExpenses, bulkRetripExpenses,
     addExpenseWithItems, updateExpenseWithItems,
+    // PS-30 — pending recurring-debit queue.
+    confirmPending, dismissPending,
+    pendingList: (...a) => expRepo.pendingList(...a),
+    pendingCount: (...a) => expRepo.pendingCount(...a),
     // read-only repo methods exposed so 2.10 can drop `useApp().repos.expenses.*`
     monthlyTrend: (...a) => expRepo.monthlyTrend(...a),
     streakDays:   (...a) => expRepo.streakDays(...a),

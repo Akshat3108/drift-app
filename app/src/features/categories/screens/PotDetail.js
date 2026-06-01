@@ -1,10 +1,42 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, SectionList, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { ProgressBar } from '@components/primitives/ProgressBar';
 import PotExpenseRow from '@features/categories/components/PotExpenseRow';
 import { potBg } from '../../../theme';
+import { categoryCashflowForecast } from '../../../analytics';
+
+// PS-28 — compact confidence cone: a min..max band with the ensemble marker,
+// the current-spend fill, and a budget tick, all on one scaled track. Pure
+// View math (no SVG) so it sits naturally under the pot's budget strip.
+function ForecastCone({ forecast, F, sym }) {
+  const { range, ensemble, current_spend: cur, budget } = forecast;
+  const scaleMax = Math.max(range.max, budget || 0, ensemble, 1) * 1.08;
+  const pct = (v) => `${Math.max(0, Math.min(100, (v / scaleMax) * 100))}%`;
+  const over = budget != null && ensemble > budget;
+  const accent = over ? F.coral : F.sageD;
+  return (
+    <View style={{ marginTop: 14 }}>
+      <View style={{ height: 12, borderRadius: 6, backgroundColor: F.cream, overflow: 'hidden' }}>
+        <View style={{ position: 'absolute', left: pct(range.min), width: pct(range.max - range.min),
+          height: 12, backgroundColor: accent, opacity: 0.25 }} />
+        <View style={{ position: 'absolute', left: 0, width: pct(cur), height: 12,
+          backgroundColor: accent, opacity: 0.55 }} />
+        <View style={{ position: 'absolute', left: pct(ensemble), width: 2, height: 12, backgroundColor: F.ink }} />
+        {budget != null && (
+          <View style={{ position: 'absolute', left: pct(budget), width: 2, height: 12, backgroundColor: F.coral }} />
+        )}
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+        <Text style={{ fontSize: 10, color: F.ink3 }}>now {sym}{Math.round(cur).toLocaleString()}</Text>
+        <Text style={{ fontSize: 10, color: F.ink3 }}>
+          range {sym}{Math.round(range.min).toLocaleString()}–{sym}{Math.round(range.max).toLocaleString()}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 function PotDetail({ route, navigation }) {
   const { potId } = route.params;
@@ -12,6 +44,19 @@ function PotDetail({ route, navigation }) {
   const insets = useSafeAreaInsets();
 
   const pot = pots.find(p => p.id === potId);
+
+  // PS-28 — per-category month-end projection (async; recomputes per pot +
+  // when the pot's spend changes so the cone tracks fresh saves).
+  const [forecast, setForecast] = useState(null);
+  const potSpend = pot?.spend;
+  useEffect(() => {
+    let cancelled = false;
+    if (potId == null) { setForecast(null); return; }
+    categoryCashflowForecast(potId)
+      .then((f) => { if (!cancelled) setForecast(f); })
+      .catch(() => { if (!cancelled) setForecast(null); });
+    return () => { cancelled = true; };
+  }, [potId, potSpend]);
 
   // 8.2 — All hooks must run unconditionally to satisfy React's rules-of-hooks.
   // Early returns happen at render time AFTER hook calls.
@@ -134,12 +179,35 @@ function PotDetail({ route, navigation }) {
           )}
         </View>
 
+        {/* PS-28 — projected month-end + confidence cone. */}
+        {forecast?.ready && (
+          <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
+            borderColor: F.line, padding: 16, marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <Text style={{ fontSize: 13, color: F.ink2 }}>Projected month-end</Text>
+              <Text style={{ fontSize: 11, color: F.ink3 }}>{forecast.confidence} confidence</Text>
+            </View>
+            <Text style={{ fontSize: 28, color: F.ink, fontWeight: '500', marginTop: 2 }}>
+              {sym}{Math.round(forecast.ensemble).toLocaleString()}
+            </Text>
+            {forecast.projected_vs_budget != null && (
+              <Text style={{ fontSize: 12, marginTop: 2,
+                color: forecast.projected_vs_budget > 0 ? F.coral : F.sageD }}>
+                {forecast.projected_vs_budget > 0
+                  ? `⚠ ${sym}${Math.round(forecast.projected_vs_budget).toLocaleString()} over budget`
+                  : `✓ ${sym}${Math.round(Math.abs(forecast.projected_vs_budget)).toLocaleString()} under budget`}
+              </Text>
+            )}
+            <ForecastCone forecast={forecast} F={F} sym={sym} />
+          </View>
+        )}
+
         <Text style={{ fontSize: 18, color: F.ink, marginTop: 20 }}>
           Transactions{potExpenses.length > 0 ? ` (${potExpenses.length})` : ''}
         </Text>
       </>
     );
-  }, [pot, F, sym, navigation, potExpenses.length]);
+  }, [pot, F, sym, navigation, potExpenses.length, forecast]);
 
   const ListEmpty = useMemo(() => {
     if (!pot) return null;

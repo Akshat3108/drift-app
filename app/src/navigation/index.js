@@ -38,6 +38,8 @@ const LINKING = {
 import HomeScreen        from '@features/home/screens/Home';
 import ScanScreen        from '@features/scan/screens/Scan';
 import ReviewQueueScreen from '@features/scan/screens/ReviewQueue';
+import CashflowCalendarScreen from '@features/analytics/screens/CashflowCalendar';
+import PendingScreen from '@features/expenses/screens/Pending';
 import TrendsScreen      from '@features/trends/screens/Trends';
 import SubsScreen        from '@features/subs/screens/Subs';
 import AddScreen         from '@features/expenses/screens/Add';
@@ -116,6 +118,8 @@ import { withBoundary } from '../components/ErrorBoundary';
 const Home        = withBoundary('Home',        HomeScreen);
 const Scan        = withBoundary('Scan',        ScanScreen);
 const ReviewQueue = withBoundary('ReviewQueue', ReviewQueueScreen);
+const CashflowCalendar = withBoundary('CashflowCalendar', CashflowCalendarScreen);
+const Pending = withBoundary('Pending', PendingScreen);
 const Trends      = withBoundary('Trends',      TrendsScreen);
 const Subs        = withBoundary('Subs',        SubsScreen);
 const Add         = withBoundary('Add',         AddScreen);
@@ -247,6 +251,10 @@ export default function Navigation() {
         <Stack.Screen name="Merchants"   component={Merchants}   options={{ title: 'Top merchants' }}/>
         {/* PS-38 — OCR review queue. */}
         <Stack.Screen name="ReviewQueue" component={ReviewQueue} options={{ title: 'Scans to review' }}/>
+        {/* PS-27 — unified forward outflow calendar. */}
+        <Stack.Screen name="CashflowCalendar" component={CashflowCalendar} options={{ title: 'Upcoming outflow' }}/>
+        {/* PS-30 — pending recurring-debit confirm queue. */}
+        <Stack.Screen name="Pending" component={Pending} options={{ title: 'To confirm' }}/>
         <Stack.Screen name="MerchantDetail" component={MerchantDetail} options={({ route }) => ({
           title: route.params?.displayName || 'Merchant',
         })}/>

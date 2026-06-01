@@ -26,6 +26,7 @@ import accountSnapshot      from './tasks/accountSnapshot';
 import monthlySummaryAudit  from './tasks/monthlySummaryAudit';
 import archiveOldRows       from './tasks/archiveOldRows';
 import trimDbStats          from './tasks/trimDbStats';
+import pendingDebits        from './tasks/pendingDebits';
 
 const RATE_LIMIT_MS = 24 * 60 * 60 * 1000;
 
@@ -53,6 +54,10 @@ const TASKS = [
   // archive batch). One cycle of skew is acceptable; the next run audits
   // the post-archive state.
   archiveOldRows,
+  // PS-30 — auto-create pending recurring debits the user opted into. Cheap
+  // no-op when no rules are enabled. Placed before trimDbStats so any slow-log
+  // rows from its writes land in the next cycle's trim window.
+  pendingDebits,
   // 8.10 — trim runs last so the slow-log row inserted by the upserts
   // above (which themselves go through `exec()`/`one()`) is included in
   // the next cycle's window, not this one.

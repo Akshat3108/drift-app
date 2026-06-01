@@ -20,15 +20,20 @@ export {
   subscriptionLeakage,
   periodToMonthly,
 } from './subscriptions';
+// PS-29 — subscription price-change (drift) detection
+export { subscriptionDrift, DRIFT_THRESHOLD } from './subDrift';
 
 // 6.9 (+ 5.A.01 completes the 5-model ensemble inside cashflowForecast)
 // 5.A.02 — approxNormalCDF + probabilityOverBudget
 // 5.A.03 — cashflowLookahead3
+// PS-28 — categoryCashflowForecast (per-pot projection)
 export {
   cashflowForecast,
+  categoryCashflowForecast,
   probabilityOverBudget,
   cashflowLookahead3,
   approxNormalCDF,
+  emiAmount,
 } from './forecast';
 // 6.10
 export {

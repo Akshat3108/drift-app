@@ -8,8 +8,11 @@ import {
   evaluateHoldingsNavReminder,
   evaluateInsuranceRenewals,
   evaluateReturnWindows,
+  evaluateSubscriptionDrift,
 } from './checkers';
 import { items as itemRepo } from '@features/items/repo';
+import { subs as subsRepo } from '@features/subs/repo';
+import { subscriptionDrift } from '../../analytics';
 import {
   ensureForegroundHandler,
   getPermissionStatus,
@@ -254,6 +257,43 @@ export function NotificationsProvider({ children }) {
     }
   }, [refreshUnread]);
 
+  // PS-29 — subscription price-drift alerts. Fetches the drifted subs and runs
+  // the price-channel checker, stamping last_alert_at on the subs that actually
+  // fired (i.e. logged past the dedupe gate). Runs on boot, toggle-on, and on
+  // expense changes (a new linked charge can move the average).
+  const evaluateSubDrift = useCallback(async () => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    let drifts = [];
+    try { drifts = await subscriptionDrift(); }
+    catch { return; }
+    if (!drifts.length) return;
+    const plan = evaluateSubscriptionDrift({
+      drifts,
+      settings: settingsRef.current,
+      sym: symRef.current,
+    });
+    if (!plan.length) return;
+    const fired = [];
+    for (const item of plan) {
+      const logged = await notificationsRepo.log({
+        kind: item.kind, title: item.title, body: item.body,
+        payload: item.payload, scheduled_for: null, dedupe_key: item.dedupe_key || null,
+      });
+      if (!logged) continue;
+      const sysId = await presentNow({
+        title: item.title, body: item.body,
+        data: { ...(item.payload || {}), notif_id: logged.id },
+      });
+      if (sysId) await notificationsRepo.markDelivered(logged.id);
+      fired.push(item);
+    }
+    for (const item of fired) {
+      const sid = item.payload?.sub_id;
+      if (sid != null) await subsRepo.markAlerted(sid).catch(() => {});
+    }
+    await refreshUnread();
+  }, [refreshUnread]);
+
   const rescheduleAllSubs = useCallback(async () => {
     if (!settingsRef.current?.notifications_enabled) return;
     const plan = evaluateSubsDue({
@@ -305,6 +345,7 @@ export function NotificationsProvider({ children }) {
           evaluateHoldings(),
           rescheduleAllInsurance(),
           evaluateReturns(),
+          evaluateSubDrift(),
         ]);
       }
       if (!cancelled) setReady(true);
@@ -321,10 +362,10 @@ export function NotificationsProvider({ children }) {
   useEffect(() => {
     const now = settings?.notifications_enabled ? 1 : 0;
     if (now && !prevEnabled.current) {
-      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance(), evaluateReturns()]).catch(() => {});
+      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance(), evaluateReturns(), evaluateSubDrift()]).catch(() => {});
     }
     prevEnabled.current = now;
-  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance, evaluateReturns]);
+  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance, evaluateReturns, evaluateSubDrift]);
 
   // NotifyBus listeners — wired here, fired from ExpensesProvider /
   // SubsProvider after their own state has settled.
@@ -340,7 +381,9 @@ export function NotificationsProvider({ children }) {
     // PS-39 — a fresh scan may have stamped new return-window dates; schedule
     // their reminders. Idempotent via the notification_log dedupe gate.
     evaluateReturns();
-  }, [evaluateBudgets, evaluatePantry, evaluateReturns]));
+    // PS-29 — a newly-linked subscription charge can shift the drift average.
+    evaluateSubDrift();
+  }, [evaluateBudgets, evaluatePantry, evaluateReturns, evaluateSubDrift]));
 
   useNotifyBusListener(NOTIFY_EVENTS.PANTRY_CHANGED, useCallback(() => {
     evaluatePantry();

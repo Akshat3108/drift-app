@@ -11,6 +11,7 @@ function SubRow({
   sub,
   F,
   sym,
+  drift,           // PS-29 — {delta_amount, delta_pct, actual_avg} when charged price drifted
   onPress,
   onLongPress,
   onCancel,
@@ -57,6 +58,18 @@ function SubRow({
           <Text style={{ fontSize: 12, color: F.ink2 }}>
             {sub.cancelled ? 'Cancelled' : (sub.used_freq || `${sym}${sub.amount.toFixed(2)}/${sub.period}`)}
           </Text>
+          {/* PS-29 — charged price drifted from the set amount. */}
+          {!sub.cancelled && drift && (
+            <View style={{ alignSelf: 'flex-start', marginTop: 4, borderRadius: 99,
+              paddingHorizontal: 8, paddingVertical: 2,
+              backgroundColor: drift.delta_amount > 0 ? '#fde2dc' : F.mint }}>
+              <Text style={{ fontSize: 10, fontWeight: '700',
+                color: drift.delta_amount > 0 ? F.coral : F.sageD }}>
+                {drift.delta_amount > 0 ? '↑ price up ' : '↓ price down '}
+                {drift.delta_amount > 0 ? '+' : '−'}{sym}{Math.abs(Math.round(drift.delta_amount))}/{sub.period}
+              </Text>
+            </View>
+          )}
         </View>
         <View style={{ alignItems: 'flex-end', gap: 6 }}>
           <Text style={{ fontSize: 16, color: F.ink }}>{sym}{sub.amount.toFixed(2)}</Text>

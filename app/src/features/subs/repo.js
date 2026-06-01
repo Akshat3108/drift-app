@@ -2,6 +2,12 @@ import { exec, all, one } from '../../db';
 import { NOT_DELETED } from '../../db/predicates';
 
 export const subs = {
+  // PS-29 — stamp the last price-drift alert time (record-keeping; the
+  // notification_log dedupe key is the real re-fire gate).
+  async markAlerted(id) {
+    return exec(`UPDATE subscriptions SET last_alert_at = datetime('now') WHERE id = ?`, [id]);
+  },
+
   async list() {
     return all(`SELECT * FROM subscriptions WHERE ${NOT_DELETED} ORDER BY created_at DESC, id DESC`);
   },

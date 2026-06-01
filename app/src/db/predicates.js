@@ -18,3 +18,11 @@ export const NOT_DELETED_E = 'e.deleted_at IS NULL';
 export const NOT_DELETED_R = 'r.deleted_at IS NULL';
 export const NOT_DELETED_C = 'c.deleted_at IS NULL';
 export const NOT_DELETED_T = 't.deleted_at IS NULL';
+
+// PS-30 — pending (auto-created, not-yet-confirmed) expenses live in the
+// `expenses` table with `is_pending = 1` and must be hidden from the visible
+// feed + raw-expenses analytics until confirmed. The v54 triggers already keep
+// them out of the rollups/FTS; these predicates cover the hand-written raw
+// reads. `buildWhere()` adds the same clause for the filtered list/search path.
+export const NOT_PENDING   = 'is_pending = 0';
+export const NOT_PENDING_E = 'e.is_pending = 0';

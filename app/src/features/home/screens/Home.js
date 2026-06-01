@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { ProgressBar } from '@components/primitives/ProgressBar';
@@ -15,7 +16,7 @@ import { savingsRatePercent, financialHealthScore } from '../../../analytics';
 
 function Home({ navigation }) {
   const { F, sym, profile, pots, expenses, totalSpend, totalIncome, monthBudget, refresh,
-    activeMonth, setActiveMonth, resetActiveMonth } = useApp();
+    activeMonth, setActiveMonth, resetActiveMonth, pendingCount } = useApp();
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const liveCurrentMonth = currentMonthKey();
   const viewingHistory = activeMonth !== liveCurrentMonth;
@@ -44,6 +45,15 @@ function Home({ navigation }) {
       .catch((e) => { logError('home.health', e); });
     return () => { cancelled = true; };
   }, [activeMonth, totalSpend, totalIncome]);
+
+  // PS-30 — count of pending recurring debits awaiting confirm/dismiss.
+  // Refetched on focus so it clears after the user works the Pending queue.
+  const [pendingN, setPendingN] = useState(0);
+  useFocusEffect(useCallback(() => {
+    let cancelled = false;
+    Promise.resolve(pendingCount?.()).then((n) => { if (!cancelled) setPendingN(n || 0); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [pendingCount]));
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -135,6 +145,25 @@ function Home({ navigation }) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* PS-30 — pending recurring-debit confirm pill. */}
+      {pendingN > 0 && (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Pending')}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={`${pendingN} recurring ${pendingN === 1 ? 'debit' : 'debits'} to confirm`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8,
+            backgroundColor: F.mint, borderRadius: 14, borderWidth: 1, borderColor: F.sageD,
+            paddingHorizontal: 14, paddingVertical: 10, marginBottom: 12 }}
+        >
+          <Text style={{ fontSize: 16 }}>🔁</Text>
+          <Text style={{ flex: 1, fontSize: 13, color: F.ink, fontWeight: '600' }}>
+            {pendingN} recurring {pendingN === 1 ? 'debit' : 'debits'} to confirm
+          </Text>
+          <Text style={{ fontSize: 16, color: F.sageD }}>›</Text>
+        </TouchableOpacity>
+      )}
 
       {/* PS-05 — month chip + viewing-history banner */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 8 }}>

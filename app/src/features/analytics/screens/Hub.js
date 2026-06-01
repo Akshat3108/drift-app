@@ -223,6 +223,10 @@ function Hub({ navigation }) {
         <ReportRow icon="🎯" title="End-of-month forecast"
           sub="3-model ensemble + confidence cone"
           F={F} onPress={() => navigation.navigate('Forecast')}/>
+        {/* PS-27 — unified forward outflow calendar. */}
+        <ReportRow icon="🗓️" title="Upcoming outflow"
+          sub="Subs, EMIs, insurance, utilities + recurring · 30/60/90d"
+          F={F} onPress={() => navigation.navigate('CashflowCalendar')}/>
         <ReportRow icon="🌊" title="Money flow"
           sub="Income → category Sankey for this month"
           F={F} onPress={() => navigation.navigate('MoneyFlow')}/>

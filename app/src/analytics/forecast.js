@@ -76,14 +76,116 @@ const HIGH_CONFIDENCE_RATIO = 1.10;
 const MED_CONFIDENCE_RATIO  = 1.25;
 
 export async function cashflowForecast() {
-  // Cache key bumped to v2 — the cached JSON shape now includes
-  // `models.recurring` and `models.dow`. Existing v1 rows are stale.
+  // Cache key bumped to v3 — the cached JSON shape now includes
+  // `models.recurring`, `models.dow`, and `models.fixed` (PS-33 — expected
+  // fixed outflows). Existing v1/v2 rows are stale.
   return getCached(
-    'cashflow_forecast_v2',
+    'cashflow_forecast_v3',
     FORECAST_TTL_SEC,
     computeForecast,
     { scope: SCOPES.FORECAST }
   );
+}
+
+// ─── PS-28 — per-category cashflow forecast ──────────────────────────────
+//
+// Reuses the linear / historical / rolling models scoped to one category
+// (the recurring + dow models are global-pattern models that don't scope
+// cleanly to a single pot, so the per-category ensemble is the 3 category-
+// scopable ones). Surfaces in PotDetail ("projected month-end vs budget" +
+// a confidence cone) and the Variance "forecast vs actual" column.
+// Cache key embeds the month so a new month recomputes; FORECAST scope is
+// invalidated by expense mutations alongside the whole-month forecast.
+export async function categoryCashflowForecast(categoryId) {
+  if (categoryId == null) return { ready: false, reason: 'no_category' };
+  const t = await one(`SELECT strftime('%Y-%m', date('now')) AS mk`);
+  const asofMonth = t?.mk || '';
+  return getCached(
+    `forecast:cat:${categoryId}:${asofMonth}`,
+    FORECAST_TTL_SEC,
+    () => computeCategoryForecast(categoryId),
+    { scope: SCOPES.FORECAST }
+  );
+}
+
+async function computeCategoryForecast(categoryId) {
+  const today = await one(`
+    SELECT date('now')                              AS today_str,
+           strftime('%Y-%m', date('now'))           AS asof_month_key,
+           CAST(strftime('%d', date('now')) AS INTEGER) AS dom,
+           CAST(strftime('%d', date('now','start of month','+1 month','-1 day')) AS INTEGER) AS dim
+  `);
+  const asofMonth   = today.asof_month_key;
+  const daysElapsed = today.dom;
+  const daysInMonth = today.dim;
+
+  const cat = await one(
+    `SELECT c.name, c.emoji, c.budget,
+            COALESCE((SELECT total FROM monthly_summary ms
+                       WHERE ms.category_id = c.id AND ms.month_key = ?), 0) AS spent
+       FROM categories c
+      WHERE c.id = ? AND c.deleted_at IS NULL`,
+    [asofMonth, categoryId]
+  );
+  if (!cat) {
+    return { ready: false, reason: 'no_category', category_id: categoryId, asof_month_key: asofMonth };
+  }
+  const currentSpend = cat.spent || 0;
+
+  const hist = await one(
+    `SELECT COUNT(DISTINCT expense_date) AS days
+       FROM expenses
+      WHERE deleted_at IS NULL AND is_pending = 0 AND category_id = ?`,
+    [categoryId]
+  );
+  const histDays = hist?.days ?? 0;
+  const budget = Number.isFinite(cat.budget) && cat.budget > 0 ? cat.budget : null;
+  if (histDays < MIN_HISTORY_DAYS) {
+    return {
+      ready: false, reason: 'insufficient_history', category_id: categoryId,
+      category_name: cat.name, category_emoji: cat.emoji,
+      asof_month_key: asofMonth, current_spend: currentSpend, budget,
+    };
+  }
+
+  const [linear, historical, rolling] = await Promise.all([
+    computeLinearWeighted(asofMonth, daysElapsed, daysInMonth, currentSpend, categoryId),
+    computeHistoricalMonth(asofMonth, categoryId),
+    computeRolling90d(daysInMonth, histDays, categoryId),
+  ]);
+  const models = { linear, historical, rolling };
+  const values = Object.values(models).filter((v) => Number.isFinite(v) && v >= 0);
+  if (values.length === 0) {
+    return { ready: false, reason: 'models_unresolved', category_id: categoryId, asof_month_key: asofMonth };
+  }
+
+  const ensemble = values.reduce((s, v) => s + v, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  let confidence;
+  if (min > 0 && max / min <= HIGH_CONFIDENCE_RATIO)      confidence = 'high';
+  else if (min > 0 && max / min <= MED_CONFIDENCE_RATIO)  confidence = 'medium';
+  else                                                     confidence = 'low';
+
+  return {
+    ready: true,
+    category_id: categoryId,
+    category_name: cat.name,
+    category_emoji: cat.emoji,
+    asof_month_key: asofMonth,
+    days_elapsed: daysElapsed,
+    days_in_month: daysInMonth,
+    current_spend: currentSpend,
+    history_days: histDays,
+    models,
+    ensemble,
+    range: { min, max },
+    confidence,
+    budget,
+    // positive ⇒ projected over budget by this much; null ⇒ no budget set.
+    projected_vs_budget: budget != null ? ensemble - budget : null,
+    over_budget: budget != null ? Math.max(0, ensemble - budget) : null,
+  };
 }
 
 async function computeForecast() {
@@ -105,17 +207,19 @@ async function computeForecast() {
   const monthSoFar = await one(
     `SELECT COALESCE(SUM(amount), 0) AS total
        FROM expenses
-      WHERE deleted_at IS NULL
+      WHERE deleted_at IS NULL AND is_pending = 0
         AND month_key = ?`,
     [asofMonth]
   );
   const currentSpend = monthSoFar?.total ?? 0;
 
   // Total history days — distinct expense_date count across all live rows.
+  // PS-30 — pending (auto-created, unconfirmed) rows are excluded so they
+  // don't inflate currentSpend or phantom-pad the history-day count.
   const history = await one(`
     SELECT COUNT(DISTINCT expense_date) AS days
       FROM expenses
-     WHERE deleted_at IS NULL
+     WHERE deleted_at IS NULL AND is_pending = 0
   `);
   const totalHistoryDays = history?.days ?? 0;
 
@@ -135,12 +239,13 @@ async function computeForecast() {
     });
   }
 
-  const [linearModel, historicalModel, rollingModel, recurringModel, dowModel] = await Promise.all([
+  const [linearModel, historicalModel, rollingModel, recurringModel, dowModel, fixedModel] = await Promise.all([
     computeLinearWeighted(asofMonth, daysElapsed, daysInMonth, currentSpend),
     computeHistoricalMonth(asofMonth),
     computeRolling90d(daysInMonth, totalHistoryDays),
     computeRecurringAware(asofMonth, today.today_str, daysElapsed, daysInMonth, currentSpend),
     computeDayOfWeekModel(asofMonth, today.today_str, daysInMonth, currentSpend),
+    computeFixedOutflows(today.today_str, currentSpend),
   ]);
 
   const models = {
@@ -149,6 +254,7 @@ async function computeForecast() {
     rolling:    rollingModel,
     recurring:  recurringModel,
     dow:        dowModel,
+    fixed:      fixedModel,
   };
   const values = Object.values(models)
     .filter((v) => Number.isFinite(v) && v >= 0);
@@ -188,16 +294,21 @@ async function computeForecast() {
 // Falls back to (currentSpend / daysElapsed) × daysInMonth when too few
 // distinct days have spend (the slope is unstable on 1 or 2 points).
 
-async function computeLinearWeighted(monthKey, daysElapsed, daysInMonth, currentSpend) {
+async function computeLinearWeighted(monthKey, daysElapsed, daysInMonth, currentSpend, categoryId = null) {
+  // PS-28 — an optional categoryId scopes every model to one pot ("only the
+  // SQL filter changes"). PS-30 — pending rows excluded.
+  const catSql = categoryId != null ? 'AND category_id = ?' : '';
+  const params = categoryId != null ? [monthKey, categoryId] : [monthKey];
   const rows = await all(
     `SELECT CAST(strftime('%d', expense_date) AS INTEGER) AS dom,
             SUM(amount) AS total
        FROM expenses
-      WHERE deleted_at IS NULL
+      WHERE deleted_at IS NULL AND is_pending = 0
         AND month_key = ?
+        ${catSql}
       GROUP BY dom
       ORDER BY dom`,
-    [monthKey]
+    params
   );
 
   if (rows.length === 0) return 0;
@@ -257,8 +368,12 @@ async function computeLinearWeighted(monthKey, daysElapsed, daysInMonth, current
 //   tier C: lifetime average month (sum / months_seen)
 // All tiers operate on monthly_summary (rolled, indexed, soft-delete-aware).
 
-async function computeHistoricalMonth(monthKey) {
+async function computeHistoricalMonth(monthKey, categoryId = null) {
   const calendarMonth = monthKey.slice(5, 7); // 'MM'
+  // PS-28 — optional category scope. monthly_summary is keyed by category_id
+  // and already excludes pending rows (the v54 triggers gate them), so no
+  // is_pending predicate is needed on this side.
+  const catSql = categoryId != null ? 'AND category_id = ?' : '';
 
   // Tier A: average end-of-month total for matching MM across history,
   // excluding the current month so the model doesn't reference its own
@@ -268,8 +383,9 @@ async function computeHistoricalMonth(monthKey) {
        FROM monthly_summary
       WHERE substr(month_key, 6, 2) = ?
         AND month_key != ?
+        ${catSql}
       GROUP BY month_key`,
-    [calendarMonth, monthKey]
+    categoryId != null ? [calendarMonth, monthKey, categoryId] : [calendarMonth, monthKey]
   );
   if (tierA.length >= 1) {
     return mean(tierA.map((r) => r.total));
@@ -280,10 +396,11 @@ async function computeHistoricalMonth(monthKey) {
     `SELECT month_key, SUM(total) AS total
        FROM monthly_summary
       WHERE month_key < ?
+        ${catSql}
       GROUP BY month_key
       ORDER BY month_key DESC
       LIMIT 3`,
-    [monthKey]
+    categoryId != null ? [monthKey, categoryId] : [monthKey]
   );
   if (tierB.length >= 1) {
     return mean(tierB.map((r) => r.total));
@@ -293,8 +410,9 @@ async function computeHistoricalMonth(monthKey) {
   const tierC = await one(
     `SELECT SUM(total) AS sum, COUNT(DISTINCT month_key) AS months
        FROM monthly_summary
-      WHERE month_key < ?`,
-    [monthKey]
+      WHERE month_key < ?
+        ${catSql}`,
+    categoryId != null ? [monthKey, categoryId] : [monthKey]
   );
   if (tierC && tierC.months > 0) {
     return tierC.sum / tierC.months;
@@ -309,16 +427,19 @@ async function computeHistoricalMonth(monthKey) {
 // in month" framing is deliberate: it answers "if the next month spends
 // at the recent daily pace, how much is that?".
 
-async function computeRolling90d(daysInMonth, totalHistoryDays) {
+async function computeRolling90d(daysInMonth, totalHistoryDays, categoryId = null) {
   const window = Math.min(90, Math.max(totalHistoryDays, 1));
+  const catSql = categoryId != null ? 'AND category_id = ?' : '';
+  const params = categoryId != null ? [window - 1, categoryId] : [window - 1];
   const row = await one(
     `SELECT COALESCE(SUM(amount), 0) AS sum,
             COUNT(DISTINCT expense_date) AS active_days
        FROM expenses
-      WHERE deleted_at IS NULL
+      WHERE deleted_at IS NULL AND is_pending = 0
         AND expense_date >= date('now', '-' || ? || ' day')
-        AND expense_date <= date('now')`,
-    [window - 1]
+        AND expense_date <= date('now')
+        ${catSql}`,
+    params
   );
   // Divide by window (not active_days) so quiet days drag the average
   // down — matches the "if next month looked like the last 90d" framing.
@@ -409,6 +530,78 @@ async function computeDayOfWeekModel(monthKey, todayStr, daysInMonth, currentSpe
   }
 
   return currentSpend + sum;
+}
+
+// ─── model 6 — expected fixed outflows (PS-33) ───────────────────────────
+//
+// currentSpend + Σ fixed obligations whose due-day falls in the remaining
+// window (today..end-of-month) and that haven't plausibly been paid yet:
+//   - subscriptions: next_bill within [today, end-of-month]. A paid sub's
+//     next_bill has already rolled forward, so an in-window next_bill ⇒ due.
+//   - insurance: next_due within [today, end-of-month].
+//   - EMI: active loans (installments_paid < tenure_months) whose bill_day is
+//     today-or-later this month — emi_override, else the amortised EMI.
+//   - utility: live accounts whose billing_day is today-or-later, estimated at
+//     the mean of their last 3 bills.
+//
+// Returns null (excluded from the ensemble) when there are no upcoming fixed
+// outflows — otherwise it would just echo currentSpend and drag the mean down,
+// exactly like the recurring model's empty-state guard.
+async function computeFixedOutflows(todayStr, currentSpend) {
+  const todayDay = parseInt((todayStr || '').slice(8, 10), 10) || 1;
+  const WINDOW = `BETWEEN date('now') AND date('now','start of month','+1 month','-1 day')`;
+
+  const [subs, ins, loans, utils] = await Promise.all([
+    one(`SELECT COALESCE(SUM(amount), 0) AS s
+           FROM subscriptions
+          WHERE deleted_at IS NULL AND cancelled = 0 AND next_bill IS NOT NULL
+            AND date(next_bill) ${WINDOW}`),
+    one(`SELECT COALESCE(SUM(premium_amount), 0) AS s
+           FROM insurance_policies
+          WHERE deleted_at IS NULL AND next_due IS NOT NULL
+            AND date(next_due) ${WINDOW}`),
+    all(`SELECT principal, annual_rate_pct, tenure_months, installments_paid, emi_override
+           FROM emi_loans
+          WHERE deleted_at IS NULL
+            AND installments_paid < tenure_months
+            AND bill_day >= ?`,
+        [todayDay]),
+    all(`SELECT (SELECT AVG(t) FROM (
+                   SELECT total AS t FROM utility_bills
+                    WHERE utility_account_id = ua.id
+                    ORDER BY period_end DESC LIMIT 3)) AS mean3
+           FROM utility_accounts ua
+          WHERE ua.deleted_at IS NULL
+            AND ua.billing_day IS NOT NULL
+            AND ua.billing_day >= ?`,
+        [todayDay]),
+  ]);
+
+  let emiSum = 0;
+  for (const l of loans) emiSum += emiAmount(l);
+  let utilSum = 0;
+  for (const u of utils) {
+    const v = Number(u.mean3);
+    if (Number.isFinite(v) && v > 0) utilSum += v;
+  }
+
+  const remaining = (subs?.s || 0) + (ins?.s || 0) + emiSum + utilSum;
+  if (remaining <= 0) return null;
+  return currentSpend + remaining;
+}
+
+// Amortised monthly EMI (override wins). r=0 ⇒ straight-line P/n.
+export function emiAmount(loan) {
+  const override = Number(loan?.emi_override);
+  if (Number.isFinite(override) && override > 0) return override;
+  const P = Number(loan?.principal) || 0;
+  const n = Number(loan?.tenure_months) || 0;
+  const annual = Number(loan?.annual_rate_pct) || 0;
+  if (P <= 0 || n <= 0) return 0;
+  const r = annual / 12 / 100;
+  if (r === 0) return P / n;
+  const pow = Math.pow(1 + r, n);
+  return (P * r * pow) / (pow - 1);
 }
 
 // ─── 5.A.02 — approxNormalCDF + probabilityOverBudget ────────────────────

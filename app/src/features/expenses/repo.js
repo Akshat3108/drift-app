@@ -1,5 +1,5 @@
 import { exec, all, one, getDB } from '../../db';
-import { NOT_DELETED, NOT_DELETED_C, NOT_DELETED_E } from '../../db/predicates';
+import { NOT_DELETED, NOT_DELETED_C, NOT_DELETED_E, NOT_PENDING, NOT_PENDING_E } from '../../db/predicates';
 import { merchants } from './merchants.repo';
 import { sanitizeFtsQuery } from './search';
 import { buildWhere } from './filters';
@@ -18,7 +18,7 @@ import { pantryRepo } from '@features/pantry/repo';
 // a receipt. Legacy scans (pre-v53, no stored confidence) surface only via the
 // empty-items clause. Defined once so reviewQueue() and reviewQueueCount()
 // can't drift. Both callers alias the expenses table as `e`.
-const REVIEW_QUEUE_WHERE = `${NOT_DELETED_E}
+const REVIEW_QUEUE_WHERE = `${NOT_DELETED_E} AND ${NOT_PENDING_E}
   AND (
     e.ocr_confidence < 0.6
     OR (
@@ -541,7 +541,7 @@ export const expenses = {
               MAX(e.expense_date) AS last_seen
          FROM expenses e
          JOIN merchants m ON m.id = e.merchant_id
-        WHERE ${NOT_DELETED_E}
+        WHERE ${NOT_DELETED_E} AND ${NOT_PENDING_E}
           AND e.merchant_id IS NOT NULL
           AND e.month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
         GROUP BY e.merchant_id
@@ -566,7 +566,7 @@ export const expenses = {
               MIN(e.expense_date)                AS first_seen,
               MAX(e.expense_date)                AS last_seen
          FROM merchants m
-    LEFT JOIN expenses e ON e.merchant_id = m.id AND ${NOT_DELETED_E}
+    LEFT JOIN expenses e ON e.merchant_id = m.id AND ${NOT_DELETED_E} AND ${NOT_PENDING_E}
         WHERE m.id = ?
         GROUP BY m.id`,
       [months, merchantId]
@@ -583,7 +583,7 @@ export const expenses = {
               SUM(e.amount) AS total,
               COUNT(*)      AS txn_count
          FROM expenses e
-        WHERE ${NOT_DELETED_E}
+        WHERE ${NOT_DELETED_E} AND ${NOT_PENDING_E}
           AND e.merchant_id = ?
           AND e.month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
         GROUP BY e.month_key
@@ -606,7 +606,7 @@ export const expenses = {
               COUNT(*)       AS txn_count
          FROM expenses e
     LEFT JOIN categories c ON c.id = e.category_id
-        WHERE ${NOT_DELETED_E}
+        WHERE ${NOT_DELETED_E} AND ${NOT_PENDING_E}
           AND e.merchant_id = ?
           AND e.month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
         GROUP BY c.id
@@ -623,7 +623,7 @@ export const expenses = {
     return all(
       `SELECT DISTINCT e.expense_date AS expense_date
          FROM expenses e
-        WHERE ${NOT_DELETED_E}
+        WHERE ${NOT_DELETED_E} AND ${NOT_PENDING_E}
           AND e.merchant_id = ?
           AND e.month_key >= strftime('%Y-%m', 'now', '-' || ? || ' months')
         ORDER BY e.expense_date ASC`,
@@ -639,7 +639,7 @@ export const expenses = {
               c.color AS category_color
          FROM expenses e
     LEFT JOIN categories c ON c.id = e.category_id
-        WHERE ${NOT_DELETED_E}
+        WHERE ${NOT_DELETED_E} AND ${NOT_PENDING_E}
           AND e.merchant_id = ?
         ORDER BY e.expense_date DESC, e.id DESC
         LIMIT ?`,
@@ -660,6 +660,7 @@ export const expenses = {
               COUNT(*)      AS txn_count
          FROM expenses
         WHERE ${NOT_DELETED}
+          AND ${NOT_PENDING}
           AND month_key = ?
         GROUP BY expense_date
         ORDER BY expense_date ASC`,
@@ -679,6 +680,7 @@ export const expenses = {
          FROM expenses e
          LEFT JOIN categories c ON c.id = e.category_id AND c.deleted_at IS NULL
         WHERE e.deleted_at IS NULL
+          AND e.is_pending = 0
           AND e.expense_date = ?
         ORDER BY e.created_at DESC, e.id DESC`,
       [date]
@@ -693,7 +695,7 @@ export const expenses = {
     return one(
       `SELECT id, amount, expense_date, category_id
          FROM expenses
-        WHERE ${NOT_DELETED} AND merchant_id = ?
+        WHERE ${NOT_DELETED} AND ${NOT_PENDING} AND merchant_id = ?
         ORDER BY expense_date DESC, id DESC
         LIMIT 1`,
       [merchantId]
@@ -708,10 +710,54 @@ export const expenses = {
     return all(
       `SELECT id, merchant, amount, expense_date
          FROM expenses
-        WHERE refund_of_expense_id = ? AND ${NOT_DELETED}
+        WHERE refund_of_expense_id = ? AND ${NOT_DELETED} AND ${NOT_PENDING}
         ORDER BY expense_date DESC, id DESC`,
       [expenseId]
     );
+  },
+
+  // PS-30 — pending (auto-created, unconfirmed) recurring debits. createPending
+  // inserts an is_pending=1 row; the v54 triggers keep it out of rollups/FTS
+  // until confirmed. confirm flips is_pending=0 (AU trigger then adds it to the
+  // rollup); dismiss hard-deletes (the AD trigger is a no-op for pending rows).
+  async createPending({ category_id, merchant, amount, expense_date }) {
+    let merchantId = null;
+    try { merchantId = await merchants.resolve(merchant); } catch { merchantId = null; }
+    const res = await exec(
+      `INSERT INTO expenses (category_id, merchant, merchant_id, amount, expense_date, is_pending)
+       VALUES (?, ?, ?, ?, COALESCE(?, date('now')), 1)`,
+      [category_id ?? null, merchant, merchantId ?? null, amount, expense_date ?? null]
+    );
+    return res.lastInsertRowId;
+  },
+
+  async pendingList() {
+    return all(
+      `SELECT e.*, c.name AS category_name, c.emoji AS category_emoji, c.color AS category_color
+         FROM expenses e
+         LEFT JOIN categories c ON c.id = e.category_id
+        WHERE e.is_pending = 1 AND e.deleted_at IS NULL
+        ORDER BY e.expense_date ASC, e.id ASC`
+    );
+  },
+
+  async pendingCount() {
+    const row = await one(
+      `SELECT COUNT(*) AS n FROM expenses WHERE is_pending = 1 AND deleted_at IS NULL`
+    );
+    return row?.n ?? 0;
+  },
+
+  // Confirm: flip to a live expense. The v54 AU trigger adds it to the rollup
+  // + FTS exactly as un-soft-deleting does.
+  async confirmPending(id) {
+    await exec(`UPDATE expenses SET is_pending = 0 WHERE id = ? AND is_pending = 1`, [id]);
+    return this.get(id);
+  },
+
+  // Dismiss: drop the projection entirely (hard delete; never entered rollups).
+  async dismissPending(id) {
+    await exec(`DELETE FROM expenses WHERE id = ? AND is_pending = 1`, [id]);
   },
 
   // PS-38 — OCR review queue. Returns the flagged scans newest-worst-first:

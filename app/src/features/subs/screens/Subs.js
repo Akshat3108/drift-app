@@ -1,8 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import SubRow from '@features/subs/components/SubRow';
+import { subscriptionDrift } from '../../../analytics';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
 
@@ -51,6 +53,15 @@ function Subs({ navigation }) {
   const [sortBy, setSortBy] = useState('recent');
   const sortedSubs = useMemo(() => sortSubs(subs, sortBy), [subs, sortBy]);
   const [hintDismissed, setHintDismissed] = useState(false);
+
+  // PS-29 — price-drift map (sub_id → drift) for the row pill. Recomputed on
+  // focus so a freshly-linked charge surfaces without a remount.
+  const [driftMap, setDriftMap] = useState(() => new Map());
+  useFocusEffect(useCallback(() => {
+    subscriptionDrift()
+      .then((list) => setDriftMap(new Map((list || []).map((d) => [d.sub_id, d]))))
+      .catch(() => setDriftMap(new Map()));
+  }, []));
 
   // 8.3 — stable per-row callbacks. Each receives the sub id (and name when
   // needed for toast copy) — keeps SubRow's React.memo effective.
@@ -128,6 +139,7 @@ function Subs({ navigation }) {
       sub={item}
       F={F}
       sym={sym}
+      drift={driftMap.get(item.id)}
       onPress={onRowPress}
       onLongPress={onRowLongPress}
       onCancel={onRowCancel}
@@ -135,7 +147,7 @@ function Subs({ navigation }) {
       onEdit={onRowEdit}
       onSwipeDelete={onRowSwipeDelete}
     />
-  ), [F, sym, onRowPress, onRowLongPress, onRowCancel, onRowReinstate, onRowEdit, onRowSwipeDelete]);
+  ), [F, sym, driftMap, onRowPress, onRowLongPress, onRowCancel, onRowReinstate, onRowEdit, onRowSwipeDelete]);
 
   const keyExtractor = useCallback((item) => String(item.id), []);
 

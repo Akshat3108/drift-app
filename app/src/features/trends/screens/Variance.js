@@ -13,7 +13,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
-import { categoryVarianceMatrix } from '../../../analytics';
+import { categoryVarianceMatrix, categoryCashflowForecast } from '../../../analytics';
 
 let Svg = null, Rect = null, Line = null, SvgText = null;
 try {
@@ -54,12 +54,25 @@ function Variance({ navigation }) {
   const [data, setData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState(null); // {row, col, value, monthKey}
+  // PS-28 — per-category month-end projection keyed by category id, loaded in
+  // parallel for the "proj" column. Cached (FORECAST scope) so this is cheap
+  // after the first paint.
+  const [forecasts, setForecasts] = useState({});
 
   const load = useCallback(async () => {
     const months = RANGES.find((r) => r.key === rangeKey)?.months ?? 6;
     const res = await categoryVarianceMatrix({ months });
     setData(res);
     setSelected(null);
+    if (res?.ready) {
+      const ids = res.categories.map((c) => c.id).filter((id) => id != null);
+      const results = await Promise.all(ids.map((id) => categoryCashflowForecast(id).catch(() => null)));
+      const map = {};
+      ids.forEach((id, i) => { if (results[i]?.ready) map[id] = results[i]; });
+      setForecasts(map);
+    } else {
+      setForecasts({});
+    }
   }, [rangeKey]);
 
   useEffect(() => { load(); }, [load]);
@@ -159,6 +172,9 @@ function Variance({ navigation }) {
                 flex: 1, fontSize: 9, color: F.ink3, textAlign: 'center',
               }}>{shortMonth(mk)}</Text>
             ))}
+            <View style={{ width: 52, alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 9, color: F.ink3 }}>proj</Text>
+            </View>{/* PS-28 — projected month-end column */}
             <View style={{ width: 40 }}/>{/* spacer for cv column */}
           </View>
 
@@ -209,6 +225,21 @@ function Variance({ navigation }) {
                   </View>
                 )}
 
+                {/* PS-28 — projected month-end (forecast vs actual). Tinted
+                    coral when projected over budget, sage when under. */}
+                {(() => {
+                  const fc = row.id != null ? forecasts[row.id] : null;
+                  const tint = fc?.projected_vs_budget == null ? F.ink2
+                    : fc.projected_vs_budget > 0 ? F.coral : F.sageD;
+                  return (
+                    <View style={{ width: 52, alignItems: 'flex-end', paddingLeft: 6 }}>
+                      <Text style={{ fontSize: 10, color: tint, fontWeight: '600' }}>
+                        {fc?.ready ? abbrMoney(sym, fc.ensemble) : '—'}
+                      </Text>
+                    </View>
+                  );
+                })()}
+
                 {/* cv badge */}
                 <View style={{ width: 40, alignItems: 'flex-end', paddingLeft: 6 }}>
                   <Text style={{ fontSize: 10, color: cvColor(row.cv, F), fontWeight: '700' }}>
@@ -227,6 +258,14 @@ function Variance({ navigation }) {
       )}
     </ScrollView>
   );
+}
+
+// Compact Indian-grouped money for the narrow proj column (₹12.3k / ₹1.2L).
+function abbrMoney(sym, n) {
+  const v = Math.round(Number(n) || 0);
+  if (v >= 100000) return `${sym}${(v / 100000).toFixed(1)}L`;
+  if (v >= 1000)   return `${sym}${(v / 1000).toFixed(1)}k`;
+  return `${sym}${v}`;
 }
 
 function cvColor(cv, F) {

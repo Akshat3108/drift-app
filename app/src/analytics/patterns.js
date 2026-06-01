@@ -237,6 +237,7 @@ export async function recurringCandidates(opts = {}) {
          FROM expenses e
     LEFT JOIN categories c ON c.id = e.category_id
         WHERE e.deleted_at IS NULL
+          AND e.is_pending = 0
           AND e.month_key >= ?
           AND e.month_key <= ?
      ORDER BY e.expense_date ASC, e.id ASC`,

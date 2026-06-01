@@ -9,6 +9,7 @@ import {
   evaluateInsuranceRenewals,
   evaluateReturnWindows,
   evaluateSubscriptionDrift,
+  evaluateBackupReminder,
 } from './checkers';
 import { items as itemRepo } from '@features/items/repo';
 import { subs as subsRepo } from '@features/subs/repo';
@@ -165,6 +166,18 @@ export function NotificationsProvider({ children }) {
       holdings: holdingsRef.current,
       settings: settingsRef.current,
     });
+    if (plan.length) {
+      await applyPlan(plan);
+      await refreshUnread();
+    }
+  }, [refreshUnread]);
+
+  // PS-42 — Backup-staleness reminder. Boot + toggle-on only (settings-driven,
+  // like the holdings NAV reminder). The notification_log dedupe keeps it to
+  // once per month.
+  const evaluateBackup = useCallback(async () => {
+    if (!settingsRef.current?.notifications_enabled) return;
+    const plan = evaluateBackupReminder({ settings: settingsRef.current });
     if (plan.length) {
       await applyPlan(plan);
       await refreshUnread();
@@ -346,6 +359,7 @@ export function NotificationsProvider({ children }) {
           rescheduleAllInsurance(),
           evaluateReturns(),
           evaluateSubDrift(),
+          evaluateBackup(),
         ]);
       }
       if (!cancelled) setReady(true);
@@ -362,10 +376,10 @@ export function NotificationsProvider({ children }) {
   useEffect(() => {
     const now = settings?.notifications_enabled ? 1 : 0;
     if (now && !prevEnabled.current) {
-      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance(), evaluateReturns(), evaluateSubDrift()]).catch(() => {});
+      Promise.all([evaluateBudgets(), rescheduleAllSubs(), evaluatePantry(), evaluateHoldings(), rescheduleAllInsurance(), evaluateReturns(), evaluateSubDrift(), evaluateBackup()]).catch(() => {});
     }
     prevEnabled.current = now;
-  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance, evaluateReturns, evaluateSubDrift]);
+  }, [settings?.notifications_enabled, evaluateBudgets, rescheduleAllSubs, evaluatePantry, evaluateHoldings, rescheduleAllInsurance, evaluateReturns, evaluateSubDrift, evaluateBackup]);
 
   // NotifyBus listeners — wired here, fired from ExpensesProvider /
   // SubsProvider after their own state has settled.

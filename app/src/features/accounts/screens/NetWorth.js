@@ -16,6 +16,7 @@ import { useApp } from '../../../hooks/useAppState';
 import { useInvestments } from '@features/investments/context';
 import { snapshotsRepo } from '../snapshot';
 import NetWorthChart from '@components/NetWorthChart';
+import { assetClassBreakdown, multiArcDonut } from '../assetClass';
 
 let Svg = null, Path = null, Circle = null, Line = null, SvgText = null;
 try {
@@ -100,9 +101,12 @@ function fmtMoney(sym, n) {
 
 function NetWorth({ navigation }) {
   const { F, sym, accounts } = useApp();
-  const { totals: holdingsTotals } = useInvestments();
+  const { totals: holdingsTotals, holdings } = useInvestments();
   const insets = useSafeAreaInsets();
   const [savings, setSavings] = useState(null);
+  // PS-32 — donut mode toggle + tapped class for the drill-down.
+  const [donutMode, setDonutMode] = useState('al'); // 'al' | 'class'
+  const [selectedClass, setSelectedClass] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +142,22 @@ function NetWorth({ navigation }) {
     () => donutArc(at, lt, donutR, donutR, donutR - 6, donutR - 22),
     [at, lt, donutR],
   );
+
+  // PS-32 — asset-class breakdown + multi-arc geometry for the class donut.
+  const classBreakdown = useMemo(
+    () => assetClassBreakdown(assets, holdings || []),
+    [assets, holdings],
+  );
+  const classArcs = useMemo(
+    () => multiArcDonut(
+      classBreakdown.map((b) => ({ value: b.value, color: b.color, key: b.key })),
+      donutR, donutR, donutR - 6, donutR - 22,
+    ),
+    [classBreakdown, donutR],
+  );
+  const selectedBucket = selectedClass
+    ? classBreakdown.find((b) => b.key === selectedClass)
+    : null;
 
   // Projection geometry.
   const winW = Dimensions.get('window').width;
@@ -217,28 +237,99 @@ function NetWorth({ navigation }) {
         </View>
       </View>
 
-      {/* PS-04 — assets vs liabilities donut */}
-      {donut && Svg && (
-        <View style={{ alignItems: 'center', marginBottom: 16 }}>
-          <Svg width={donutSize} height={donutSize}>
-            <Path d={donut.assetsPath}      fill={F.sageD}/>
-            <Path d={donut.liabilitiesPath} fill={F.coral}/>
-            <SvgText x={donutR} y={donutR - 6} fontSize="11" fill={F.ink3} textAnchor="middle">Net</SvgText>
-            <SvgText x={donutR} y={donutR + 14} fontSize="18" fill={net >= 0 ? F.ink : F.coral}
-              fontWeight="700" textAnchor="middle">
-              {fmtMoney(sym, net)}
-            </SvgText>
-          </Svg>
-          <View style={{ flexDirection: 'row', gap: 14, marginTop: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: F.sageD }}/>
-              <Text style={{ fontSize: 11, color: F.ink2 }}>Assets {Math.round(donut.aFrac * 100)}%</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: F.coral }}/>
-              <Text style={{ fontSize: 11, color: F.ink2 }}>Liabilities {Math.round(donut.lFrac * 100)}%</Text>
-            </View>
+      {/* PS-04 / PS-32 — net-worth donut with an Assets-vs-Liabilities ↔ By-asset-class toggle */}
+      {Svg && (donut || classBreakdown.length > 0) && (
+        <View style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignSelf: 'center', backgroundColor: F.surface,
+            borderRadius: 99, borderWidth: 1, borderColor: F.line, padding: 3, marginBottom: 12 }}>
+            {[{ k: 'al', l: 'Assets vs Liabilities' }, { k: 'class', l: 'By asset class' }].map((opt) => {
+              const sel = donutMode === opt.k;
+              return (
+                <TouchableOpacity key={opt.k}
+                  onPress={() => { setDonutMode(opt.k); setSelectedClass(null); }}
+                  accessibilityRole="button" accessibilityState={{ selected: sel }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 99,
+                    backgroundColor: sel ? F.coral : 'transparent' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: sel ? '#fff' : F.ink2 }}>{opt.l}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          {donutMode === 'al' ? (
+            donut ? (
+              <View style={{ alignItems: 'center' }}>
+                <Svg width={donutSize} height={donutSize}>
+                  <Path d={donut.assetsPath}      fill={F.sageD}/>
+                  <Path d={donut.liabilitiesPath} fill={F.coral}/>
+                  <SvgText x={donutR} y={donutR - 6} fontSize="11" fill={F.ink3} textAnchor="middle">Net</SvgText>
+                  <SvgText x={donutR} y={donutR + 14} fontSize="18" fill={net >= 0 ? F.ink : F.coral}
+                    fontWeight="700" textAnchor="middle">
+                    {fmtMoney(sym, net)}
+                  </SvgText>
+                </Svg>
+                <View style={{ flexDirection: 'row', gap: 14, marginTop: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: F.sageD }}/>
+                    <Text style={{ fontSize: 11, color: F.ink2 }}>Assets {Math.round(donut.aFrac * 100)}%</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: F.coral }}/>
+                    <Text style={{ fontSize: 11, color: F.ink2 }}>Liabilities {Math.round(donut.lFrac * 100)}%</Text>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <Text style={{ fontSize: 13, color: F.ink3, textAlign: 'center' }}>Add accounts to see the split.</Text>
+            )
+          ) : (
+            classBreakdown.length > 0 ? (
+              <View style={{ alignItems: 'center' }}>
+                <Svg width={donutSize} height={donutSize}>
+                  {classArcs.map((a) => (
+                    <Path key={a.key} d={a.path} fill={a.color}
+                      opacity={selectedClass && selectedClass !== a.key ? 0.3 : 1}/>
+                  ))}
+                  <SvgText x={donutR} y={donutR - 6} fontSize="11" fill={F.ink3} textAnchor="middle">Assets</SvgText>
+                  <SvgText x={donutR} y={donutR + 14} fontSize="16" fill={F.ink} fontWeight="700" textAnchor="middle">
+                    {fmtMoney(sym, at)}
+                  </SvgText>
+                </Svg>
+                {/* tappable legend → per-class drill list */}
+                <View style={{ width: '100%', marginTop: 10 }}>
+                  {classBreakdown.map((b) => {
+                    const sel = selectedClass === b.key;
+                    const pct = at > 0 ? Math.round((b.value / at) * 100) : 0;
+                    return (
+                      <View key={b.key}>
+                        <TouchableOpacity onPress={() => setSelectedClass(sel ? null : b.key)}
+                          accessibilityRole="button" accessibilityState={{ expanded: sel }}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7 }}>
+                          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: b.color }}/>
+                          <Text style={{ flex: 1, fontSize: 13, color: F.ink, fontWeight: sel ? '700' : '500' }}>{b.label}</Text>
+                          <Text style={{ fontSize: 12, color: F.ink2 }}>{fmtMoney(sym, b.value)}</Text>
+                          <Text style={{ fontSize: 11, color: F.ink3, width: 34, textAlign: 'right' }}>{pct}%</Text>
+                          <Text style={{ fontSize: 12, color: F.ink3 }}>{sel ? '▾' : '▸'}</Text>
+                        </TouchableOpacity>
+                        {sel && b.members.map((m, i) => (
+                          <View key={`${b.key}-${i}`} style={{ flexDirection: 'row', alignItems: 'center',
+                            gap: 8, paddingVertical: 5, paddingLeft: 18 }}>
+                            <Text style={{ fontSize: 12 }}>{m.type === 'holding' ? '📈' : '💼'}</Text>
+                            <Text style={{ flex: 1, fontSize: 12, color: F.ink2 }} numberOfLines={1}>{m.label}</Text>
+                            <Text style={{ fontSize: 12, color: F.ink2 }}>{fmtMoney(sym, m.value)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : (
+              <Text style={{ fontSize: 13, color: F.ink3, textAlign: 'center' }}>
+                Give your asset accounts a category (e.g. “Bank”, “Gold”) to see the class split.
+              </Text>
+            )
+          )}
         </View>
       )}
 

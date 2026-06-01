@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { accounts as accRepo } from './repo';
 import { snapshotsRepo } from './snapshot';
 import { useRegisterRefresh } from '@core/state/RefreshBus';
+import { useNotifyBusListener, NOTIFY_EVENTS } from '@core/state/NotifyBus';
 
 const AccountsContext = createContext(null);
 
@@ -31,6 +32,11 @@ export function AccountsProvider({ children }) {
   }, [refresh, stampSnapshot]);
 
   useRegisterRefresh('accounts', refresh);
+
+  // PS-45 — a cash expense debits the Cash account outside this provider; re-list
+  // on EXPENSE_CHANGED so NetWorth reflects the new wallet balance immediately.
+  // Cheap single-row-set SELECT; no-op for users without cash tracking.
+  useNotifyBusListener(NOTIFY_EVENTS.EXPENSE_CHANGED, refresh);
 
   const addAccount    = useCallback(async (data)      => { await accRepo.create(data);     setAccounts(await accRepo.list()); await stampSnapshot(); }, [stampSnapshot]);
   const updateAccount = useCallback(async (id, patch) => { await accRepo.update(id, patch); setAccounts(await accRepo.list()); await stampSnapshot(); }, [stampSnapshot]);

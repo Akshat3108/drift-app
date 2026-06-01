@@ -2,6 +2,10 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { expenses as expRepo } from './repo';
 import { items as itemRepo } from '@features/items/repo';
 import { tagsRepo } from '@features/tags/repo';
+import { tagRulesRepo } from '@features/tags/rulesRepo';
+import { autoTagIdsFor } from '@features/tags/ruleMatch';
+import { cashRepo } from '@features/accounts/cash';
+import { settings as settingsRepo } from '@features/profile/settings.repo';
 import { splitsRepo } from '@features/splits/repo';
 import { rolloverRepo } from '@features/rollover/repo';
 import { useRegisterRefresh } from '@core/state/RefreshBus';
@@ -45,6 +49,52 @@ function summaryFromRows(rows) {
   const totalSpend  = pots.reduce((s, p) => s + p.spend, 0);
   const monthBudget = pots.reduce((s, p) => s + p.budget, 0);
   return { pots, totalSpend, monthBudget };
+}
+
+// PS-35 — resolve the auto-tag names a saved expense should pick up from the
+// enabled tag_rules. Matches against the persisted row (all axes present) and
+// returns tag NAMES (tagsRepo.setForExpense is name-based). Fail-soft: any
+// error → no auto-tags, never blocks the save.
+async function autoTagNames(matchRow) {
+  if (!matchRow) return [];
+  try {
+    const rules = await tagRulesRepo.enabledRules();
+    if (!rules.length) return [];
+    const ids = autoTagIdsFor(rules, matchRow);
+    if (!ids.length) return [];
+    const nameById = new Map(rules.map((r) => [r.tag_id, r.tag_name]));
+    return ids.map((id) => nameById.get(id)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Union of the user's explicit tag names with rule-derived auto-tags. Returns
+// null when there's nothing to write (no explicit set AND no auto-match) so the
+// caller can skip touching joins entirely.
+function mergeTagNames(explicit, auto) {
+  const hasExplicit = Array.isArray(explicit);
+  if (!hasExplicit && (!auto || auto.length === 0)) return null;
+  return Array.from(new Set([...(hasExplicit ? explicit : []), ...(auto || [])]));
+}
+
+// PS-45 — when cash tracking is ON, debit the Cash account for a newly-created
+// cash expense (create paths only; edits are reconciled manually). The
+// payment-method check gates the settings read so non-cash saves stay cheap.
+// Fail-soft: a cash-ledger error never blocks the expense save.
+async function maybeApplyCash(row) {
+  try {
+    if (!row || row.payment_method !== 'cash') return;
+    const s = await settingsRepo.get();
+    if (!s?.track_cash) return;
+    await cashRepo.applyExpense({
+      amount: row.amount,
+      expenseId: row.id,
+      note: `cash · ${row.merchant || ''}`.trim(),
+    });
+  } catch {
+    /* fail-soft — wallet tracking must never break a save */
+  }
 }
 
 export function ExpensesProvider({ children }) {
@@ -107,12 +157,15 @@ export function ExpensesProvider({ children }) {
     // 7.9 — same pattern for splits ({person_id, amount}[]).
     const { tags, splits, ...rest } = data || {};
     const row = await expRepo.create(rest);
-    if (Array.isArray(tags) && row?.id != null) {
-      await tagsRepo.setForExpense(row.id, tags);
+    // PS-35 — apply auto-tag rules on create (union with any explicit tags).
+    const finalTags = row?.id != null ? mergeTagNames(tags, await autoTagNames(row)) : null;
+    if (finalTags && row?.id != null) {
+      await tagsRepo.setForExpense(row.id, finalTags);
     }
     if (Array.isArray(splits) && row?.id != null) {
       await splitsRepo.setForExpense(row.id, splits);
     }
+    await maybeApplyCash(row);                          // PS-45
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
     return row;
@@ -121,8 +174,10 @@ export function ExpensesProvider({ children }) {
   const updateExpense = useCallback(async (id, patch) => {
     const { tags, splits, ...rest } = patch || {};
     const row = await expRepo.update(id, rest);
+    // PS-35 — only when the user engaged the tag editor (tags is an array) do we
+    // re-evaluate rules and union them in; an absent tags field leaves joins be.
     if (Array.isArray(tags)) {
-      await tagsRepo.setForExpense(id, tags);
+      await tagsRepo.setForExpense(id, mergeTagNames(tags, await autoTagNames(row)) || tags);
     }
     if (Array.isArray(splits)) {
       await splitsRepo.setForExpense(id, splits);
@@ -188,12 +243,15 @@ export function ExpensesProvider({ children }) {
     // 7.9 — same pattern for splits.
     const { tags, splits, ...expenseRest } = expense || {};
     const row = await expRepo.createWithItems({ expense: expenseRest, items });
-    if (Array.isArray(tags) && row?.id != null) {
-      await tagsRepo.setForExpense(row.id, tags);
+    // PS-35 — auto-tag rules also fire on the scan-save path.
+    const finalTags = row?.id != null ? mergeTagNames(tags, await autoTagNames(row)) : null;
+    if (finalTags && row?.id != null) {
+      await tagsRepo.setForExpense(row.id, finalTags);
     }
     if (Array.isArray(splits) && row?.id != null) {
       await splitsRepo.setForExpense(row.id, splits);
     }
+    await maybeApplyCash(row);                          // PS-45
     setExpenses(prev => sortExpenses([row, ...prev]));
     await refreshSummary();
     // 7.8 — Emit a price-observations event so NotificationsProvider can run
@@ -218,7 +276,7 @@ export function ExpensesProvider({ children }) {
     const updated = await expRepo.update(id, patchRest);
     await itemRepo.replaceItems(id, items, updated?.expense_date);
     if (Array.isArray(tags)) {
-      await tagsRepo.setForExpense(id, tags);
+      await tagsRepo.setForExpense(id, mergeTagNames(tags, await autoTagNames(updated)) || tags);
     }
     if (Array.isArray(splits)) {
       await splitsRepo.setForExpense(id, splits);

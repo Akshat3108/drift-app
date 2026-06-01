@@ -37,7 +37,46 @@ function decorate(row) {
   };
 }
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export const holdingsRepo = {
+  // PS-31 — append a NAV snapshot to holding_nav_history. One row per day:
+  //   · exact same-NAV-same-day      → skip (debounce)
+  //   · different NAV, same day       → overwrite that day's row (last write wins)
+  //   · new day                       → insert
+  // So the chart/XIRR see a clean daily series even if the user edits twice.
+  async _recordNav(holdingId, nav, source = 'user', recordedAt = null) {
+    const navN = Number(nav);
+    if (!Number.isFinite(navN) || navN <= 0) return;
+    const day = String(recordedAt || todayIso()).slice(0, 10);
+    const last = await one(
+      `SELECT id, nav, recorded_at FROM holding_nav_history
+         WHERE holding_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+      [holdingId]
+    );
+    if (last && last.recorded_at === day) {
+      if (Number(last.nav) === navN) return;            // debounce exact dupe
+      await exec('UPDATE holding_nav_history SET nav = ?, source = ? WHERE id = ?',
+        [navN, source, last.id]);
+      return;
+    }
+    await exec(
+      `INSERT INTO holding_nav_history (holding_id, nav, recorded_at, source)
+       VALUES (?, ?, ?, ?)`,
+      [holdingId, navN, day, source]
+    );
+  },
+
+  async navHistory(holdingId) {
+    return all(
+      `SELECT id, nav, recorded_at, source FROM holding_nav_history
+         WHERE holding_id = ? ORDER BY recorded_at ASC, id ASC`,
+      [holdingId]
+    );
+  },
+
   async list() {
     const rows = await all(
       `SELECT * FROM holdings
@@ -79,7 +118,10 @@ export const holdingsRepo = {
         nextOrder,
       ]
     );
-    return this.get(res.lastInsertRowId);
+    const created = await this.get(res.lastInsertRowId);
+    // PS-31 — seed the first NAV-history point so the returns chart has an origin.
+    await this._recordNav(created.id, current_nav, 'seed', last_updated);
+    return created;
   },
 
   async update(id, patch) {
@@ -101,6 +143,11 @@ export const holdingsRepo = {
         next.sort_order, id,
       ]
     );
+    // PS-31 — record a NAV point when the NAV actually moved (skip label-only
+    // edits so the series isn't padded with flat duplicates).
+    if (Number(next.current_nav) !== Number(cur.current_nav)) {
+      await this._recordNav(id, next.current_nav, 'manual_edit', next.last_updated);
+    }
     return this.get(id);
   },
 
@@ -112,6 +159,7 @@ export const holdingsRepo = {
       `UPDATE holdings SET current_nav = ?, last_updated = ? WHERE id = ?`,
       [current_nav, today, id]
     );
+    await this._recordNav(id, current_nav, 'user', today);
     return this.get(id);
   },
 

@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import {
   spendingVelocity, inflationBasket, lifestyleInflation,
-  subscriptionLeakage, reorderQueue,
+  subscriptionLeakage, reorderQueue, activeTagCount,
 } from '../../../analytics';
 import { expenses as expRepo } from '@features/expenses/repo';
 
@@ -69,19 +69,24 @@ function Hub({ navigation }) {
   const [reorder, setReorder]     = useState(null);
   // PS-38 — count of scans flagged for review (low confidence / no items).
   const [reviewCount, setReviewCount] = useState(0);
+  // PS-34 — count of tags used this month (gates the "Top tags" row).
+  const [tagCount, setTagCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const [v, i, l, s, r, rc] = await Promise.all([
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const [v, i, l, s, r, rc, tc] = await Promise.all([
       spendingVelocity().catch(() => null),
       inflationBasket().catch(() => null),
       lifestyleInflation().catch(() => null),
       subscriptionLeakage().catch(() => null),
       reorderQueue().catch(() => null),
       expRepo.reviewQueueCount().catch(() => 0),
+      activeTagCount(monthKey).catch(() => 0),
     ]);
     setVelocity(v); setInflation(i); setLifestyle(l); setLeakage(s); setReorder(r);
     setReviewCount(rc || 0);
+    setTagCount(tc || 0);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -235,6 +240,12 @@ function Hub({ navigation }) {
           <ReportRow icon="💵" title="Income mix"
             sub="Sources this month + 12-month trend"
             F={F} onPress={() => navigation.navigate('IncomeBreakdown')}/>
+        )}
+        {/* PS-34 — top tags, shown once any tag is used this month. */}
+        {tagCount > 0 && (
+          <ReportRow icon="🏷" title="Top tags"
+            sub="Spend per tag + category breakdown"
+            F={F} onPress={() => navigation.navigate('TagAnalytics')}/>
         )}
         <ReportRow icon="🎭" title="Mood × spend"
           sub="How feelings shape your spending"

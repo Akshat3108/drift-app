@@ -1715,6 +1715,63 @@ BEGIN
 END;
 `;
 
+// v55 — post_187_supplement_v2 Wave-5 schema. Batches the columns/tables needed
+// by the four schema-touching Wave-5 tasks (PS-36/31/35/42) plus the one
+// settings flag PS-45's opt-in branch needs; the other five (PS-32/34/40/47/48)
+// are schema-free. Pure additive ALTER + CREATE — no rebuild, matching the
+// additive-migration discipline of the prior 54 versions.
+//   PS-36 — `categories.parent_id` makes pots hierarchical (self-ref FK SET
+//           NULL; NULL = top-level). monthly_summary stays keyed on the LEAF
+//           category_id, so the parent rollup is computed JS-side and NO trigger
+//           change is needed. Deleting a parent re-parents its children to
+//           top-level rather than cascading — preserves their history.
+//   PS-31 — `holding_nav_history` keeps the time-series of NAV snapshots that
+//           PS-10 used to overwrite, so CAGR/XIRR + a returns chart become
+//           possible. CASCADE off holdings so deleting a holding drops its
+//           history. `source` distinguishes a user NAV edit from a seed row.
+//   PS-35 — `tag_rules` persists auto-tag predicates (predicate_json) → tag_id.
+//           Soft-deletable (deleted_at) so disabling/removing a rule preserves
+//           the audit of what auto-tagged past expenses. Partial index covers
+//           the hot path (enabled, live rules evaluated on every save).
+//   PS-42 — `settings.last_backup_at` / `backup_reminder_days` drive the
+//           backup-staleness reminder + the PS-22 health input.
+//   PS-45 — `settings.track_cash` gates the OPT-IN cash-on-hand reconciliation
+//           (default 0 → no Cash account is auto-created for existing users;
+//           the save-path debit only fires once the user turns this ON).
+const V55_SQL = `
+ALTER TABLE categories ADD COLUMN parent_id INTEGER
+  REFERENCES categories(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_categories_parent
+  ON categories(parent_id) WHERE parent_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS holding_nav_history (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  holding_id  INTEGER NOT NULL REFERENCES holdings(id) ON DELETE CASCADE,
+  nav         REAL NOT NULL,
+  recorded_at TEXT NOT NULL,
+  source      TEXT NOT NULL DEFAULT 'user'
+                CHECK (source IN ('user','manual_edit','seed')),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_nav_history_holding_date
+  ON holding_nav_history(holding_id, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS tag_rules (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  predicate_json TEXT NOT NULL,
+  tag_id         INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  enabled        INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tag_rules_enabled
+  ON tag_rules(enabled) WHERE deleted_at IS NULL AND enabled = 1;
+
+ALTER TABLE settings ADD COLUMN last_backup_at TEXT NULL;
+ALTER TABLE settings ADD COLUMN backup_reminder_days INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE settings ADD COLUMN track_cash INTEGER NOT NULL DEFAULT 0;
+`;
+
 // v48 — PS-13 FASTag tracking. Each row models one FASTag (tied to a
 // vehicle, identified by the tag_id printed on the sticker). `current_balance`
 // is the last-known wallet balance from a recharge / CSV import / manual
@@ -2071,6 +2128,11 @@ export const migrations = [
     name: 'pending-debits-sub-drift',
     up: async (db) => { await db.execAsync(V54_SQL); },
   },
+  {
+    version: 55,
+    name: 'wave5-subcats-nav-tagrules-backup-cash',
+    up: async (db) => { await db.execAsync(V55_SQL); },
+  },
 ];
 
 // Tables present after v1 — used by the legacy-stamp detection in runMigrations()
@@ -2138,7 +2200,9 @@ export const TABLES = [
   'notification_log',
   // 7.3 — expense_tags is a child of both expenses (already wiped above) and
   // tags. Children-first wipe order requires expense_tags before tags.
-  'expense_tags', 'tags',
+  // PS-35 — tag_rules is a child of tags (FK CASCADE); wiped before tags so the
+  // cascade is a no-op on reset.
+  'expense_tags', 'tag_rules', 'tags',
   // 7.7 — pantry_items has no FK (it joins to receipt_items by normalized_name,
   // not by id). Ordering is purely organisational; place next to the other
   // user-customisation tables.
@@ -2156,6 +2220,9 @@ export const TABLES = [
   'utility_accounts',
   // 7.13 — account_snapshots has no FK; place near other audit-style tables.
   'account_snapshots',
+  // PS-31 — holding_nav_history is a child of holdings (FK CASCADE). Wiped
+  // before holdings so the cascade is a no-op on reset.
+  'holding_nav_history',
   // PS-10 — holdings is a child of accounts (FK ON DELETE SET NULL). Wiped
   // BEFORE accounts so the FK SET NULL on cascade is a no-op (rows already
   // gone). Children-first convention preserved even though SET NULL would

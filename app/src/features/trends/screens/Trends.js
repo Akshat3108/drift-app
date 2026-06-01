@@ -208,6 +208,23 @@ function Trends({ navigation }) {
         </View>
       )}
 
+      {/* PS-47 — 3-month side-by-side comparison. */}
+      {pots.length > 0 && (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('CompareMonths')}
+          activeOpacity={0.8}
+          accessibilityRole="button" accessibilityLabel="Compare three months side by side"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16,
+            backgroundColor: F.surface, borderRadius: 14, borderWidth: 1, borderColor: F.line, padding: 14 }}>
+          <Text style={{ fontSize: 18 }}>🆚</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, color: F.ink, fontWeight: '600' }}>Compare months</Text>
+            <Text style={{ fontSize: 11, color: F.ink3 }}>Any 3 months, category-by-category</Text>
+          </View>
+          <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ backgroundColor: F.surface, borderRadius: 20, borderWidth: 1,
         borderColor: F.line, marginBottom: 16, overflow: 'hidden' }}>
         <View style={{ padding: 18, paddingBottom: 12 }}>

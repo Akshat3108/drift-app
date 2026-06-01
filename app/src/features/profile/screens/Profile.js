@@ -6,11 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useProfile } from '../context';
 import { Toggle } from '@components/primitives/Toggle';
+import { cashRepo } from '@features/accounts/cash';
+import { useRefreshBus } from '@core/state/RefreshBus';
 import { CURRENCIES } from '@core/domain/currencies';
 import { AVATAR_CHOICES } from '@core/domain/avatars';
 import { useNotifications } from '@features/notifications/context';
 import { useToast } from '@components/Toast';
-import { createBackup, restoreBackup } from '../../../backup';
+import { createBackup, restoreBackup, previewRestore } from '../../../backup';
 import { BackupAuthError } from '../../../backup/crypto';
 import * as LocalAuth from '../../lock/LocalAuth';
 import {
@@ -45,6 +47,7 @@ function Profile({ navigation }) {
   const { F, sym, profile, subs, goals, expenses, settings, monthBudget, totalSpend,
     setSetting, updateProfile, resetApp } = useApp();
   const { recentSearches, clearRecentSearches } = useProfile();
+  const refreshBus = useRefreshBus();
   const notifications = useNotifications();
   const insets = useSafeAreaInsets();
   const [editingName, setEditingName] = useState(false);
@@ -67,6 +70,11 @@ function Profile({ navigation }) {
   const [restoreFile, setRestoreFile] = useState(null);     // { uri, name }
   const [restorePass, setRestorePass] = useState('');
   const [restoreBusy, setRestoreBusy] = useState(false);
+
+  // PS-45 — cash reconciliation modal.
+  const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [reconcileVal, setReconcileVal] = useState('');
+  const [cashBalance, setCashBalance] = useState(null);
   const [restoreErr, setRestoreErr] = useState('');
   useEffect(() => {
     let cancelled = false;
@@ -260,6 +268,9 @@ function Profile({ navigation }) {
     setBackupBusy(true);
     try {
       const { path, bytes } = await createBackup({ passphrase: backupPass });
+      // PS-42 — stamp the successful backup so the staleness reminder + health
+      // score know the data is fresh.
+      try { await setSetting('last_backup_at', new Date().toISOString()); } catch {}
       setBackupOpen(false);
       setBackupPass(''); setBackupPassConfirm('');
       const sizeMb = (bytes / 1024 / 1024).toFixed(2);
@@ -291,8 +302,9 @@ function Profile({ navigation }) {
     }
   };
 
-  const handleRunRestore = async () => {
-    if (restoreBusy || !restoreFile || !restorePass) return;
+  // PS-42 — perform the actual destructive swap (called only after the user
+  // confirms the dry-run preview).
+  const performRestore = async () => {
     setRestoreBusy(true);
     setRestoreErr('');
     try {
@@ -311,6 +323,78 @@ function Profile({ navigation }) {
       }
     } finally {
       setRestoreBusy(false);
+    }
+  };
+
+  // PS-42 — restore is now a two-step flow: dry-run preview first (decrypts in
+  // memory, counts what the backup holds vs current), then a confirm that does
+  // the irreversible swap.
+  const handleRunRestore = async () => {
+    if (restoreBusy || !restoreFile || !restorePass) return;
+    setRestoreBusy(true);
+    setRestoreErr('');
+    try {
+      const { backup, current } = await previewRestore({ uri: restoreFile.uri, passphrase: restorePass });
+      setRestoreBusy(false);
+      Alert.alert(
+        'Restore this backup?',
+        `The backup holds:\n` +
+        `  • ${backup.expenses} expenses\n` +
+        `  • ${backup.income} income entries\n` +
+        `  • ${backup.receipts} receipts  (schema v${backup.schema})\n\n` +
+        `Restoring REPLACES your current data:\n` +
+        `  • ${current.expenses} expenses\n` +
+        `  • ${current.income} income entries\n` +
+        `  • ${current.receipts} receipts\n\n` +
+        `This cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Restore', style: 'destructive', onPress: performRestore },
+        ],
+      );
+      return;
+    } catch (e) {
+      if (e instanceof BackupAuthError) {
+        setRestoreErr('Wrong passphrase, or the backup file was modified.');
+      } else {
+        setRestoreErr(e.message || String(e));
+      }
+    } finally {
+      setRestoreBusy(false);
+    }
+  };
+
+  // PS-45 — cash-on-hand tracking (opt-in). Turning it on auto-creates the Cash
+  // account so it appears in NetWorth immediately.
+  const handleTrackCashToggle = async (v) => {
+    await setSetting('track_cash', v ? 1 : 0);
+    if (v) {
+      try { await cashRepo.ensureCashAccount(); await refreshBus?.refreshAll?.(); }
+      catch (e) { logError('cash:ensure', e); }
+    }
+  };
+
+  const openReconcile = async () => {
+    try {
+      const c = await cashRepo.getCashAccount();
+      const bal = c ? Number(c.balance) || 0 : 0;
+      setCashBalance(bal);
+      setReconcileVal(String(Math.round(bal)));
+    } catch { setCashBalance(0); setReconcileVal(''); }
+    setReconcileOpen(true);
+  };
+
+  const handleReconcile = async () => {
+    const target = parseFloat(reconcileVal);
+    if (!Number.isFinite(target)) { Alert.alert('Enter a valid amount'); return; }
+    try {
+      await cashRepo.reconcile(target);
+      await refreshBus?.refreshAll?.();
+      setReconcileOpen(false);
+      toast('Cash reconciled');
+    } catch (e) {
+      logError('cash:reconcile', e);
+      Alert.alert('Could not reconcile', e?.message || String(e));
     }
   };
 
@@ -377,6 +461,14 @@ function Profile({ navigation }) {
         <Row icon="🖼️" label="Receipt thumbnails" sub="Show receipt image in expense rows" F={F}
           right={<Toggle value={!!settings.show_receipt_thumbnails}
                          onChange={v => setSetting('show_receipt_thumbnails', v ? 1 : 0)} F={F}/>}/>
+        {/* PS-45 — Opt-in cash-on-hand tracking. */}
+        <Row icon="💵" label="Track cash on hand" sub="Cash spends debit a Cash account" F={F}
+          right={<Toggle value={!!settings.track_cash} onChange={handleTrackCashToggle} F={F}/>}/>
+        {!!settings.track_cash && (
+          <Row icon="🧮" label="Reconcile cash" sub="Snap the balance to your actual wallet" F={F}
+            onPress={openReconcile}
+            right={<Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>}/>
+        )}
       </View>
 
       <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
@@ -713,6 +805,40 @@ function Profile({ navigation }) {
                 {backupBusy
                   ? <ActivityIndicator color="#fff"/>
                   : <Text style={{ color: '#fff', fontWeight: '700' }}>Create backup</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* PS-45 — Reconcile cash modal */}
+      <Modal visible={reconcileOpen} animationType="slide" transparent
+        onRequestClose={() => setReconcileOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: F.bg, padding: 24,
+            borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom + 24 }}>
+            <Text style={{ fontSize: 20, color: F.ink, marginBottom: 4 }}>Reconcile cash</Text>
+            <Text style={{ fontSize: 12, color: F.ink3, marginBottom: 16 }}>
+              How much cash do you actually have right now? Tracked balance: {sym}{Math.round(cashBalance ?? 0).toLocaleString('en-IN')}
+            </Text>
+            <TextInput
+              value={reconcileVal}
+              onChangeText={(t) => setReconcileVal(t.replace(/[^0-9.]/g, ''))}
+              keyboardType="decimal-pad"
+              placeholder={`${sym} actual cash on hand`}
+              placeholderTextColor={F.ink3}
+              style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: F.line,
+                backgroundColor: F.surface, fontSize: 22, color: F.ink, marginBottom: 16 }}
+            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity onPress={() => setReconcileOpen(false)}
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: F.surface,
+                  borderWidth: 1, borderColor: F.line, alignItems: 'center' }}>
+                <Text style={{ color: F.ink, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleReconcile}
+                style={{ flex: 2, padding: 14, borderRadius: 12, backgroundColor: F.coral, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Reconcile</Text>
               </TouchableOpacity>
             </View>
           </View>

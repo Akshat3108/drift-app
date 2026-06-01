@@ -87,3 +87,6 @@ export { hourOfDayHistogram } from './timeOfDay';
 
 // PS-26 — Budget recommendation engine (p75 × seasonal multiplier).
 export { suggestBudgets } from './budgetSuggest';
+
+// PS-34 — Tag analytics (per-tag spend rollup + category breakdown).
+export { tagAggregates, activeTagCount } from './tags';

@@ -287,6 +287,40 @@ export function evaluateHoldingsNavReminder({ holdings, settings, now = new Date
   }];
 }
 
+// PS-42 — Backup-staleness reminder.
+//
+// Fires once per calendar month when the last successful backup is older than
+// `backup_reminder_days` (or there has never been a backup). One notification
+// for the whole app; the dedupe key embeds YYYY-MM so it re-arms next month.
+// `backup_reminder_days = 0` disables the nudge. Gated by the master switch
+// only — backups aren't one of the five PS-41 per-channel toggles.
+//
+// NOTE: the v2 supplement described this as a maintenance task. It is instead a
+// checker wired into NotificationsProvider (like every other reminder) so it
+// reuses the notification_log dedupe + scheduler pipeline rather than bolting
+// notification-posting onto the maintenance runner, which has none.
+export function evaluateBackupReminder({ settings, now = new Date() }) {
+  if (!settings?.notifications_enabled) return [];
+  const days = Number(settings?.backup_reminder_days);
+  const reminderDays = Number.isFinite(days) ? days : 30;
+  if (reminderDays <= 0) return [];                       // 0 = disabled
+  const last = settings?.last_backup_at ? Date.parse(settings.last_backup_at) : null;
+  const cutoff = now.getTime() - reminderDays * 24 * 60 * 60 * 1000;
+  const stale = last == null || !Number.isFinite(last) || last < cutoff;
+  if (!stale) return [];
+  const monthKey = currentMonthKey(now);
+  return [{
+    dedupe_key: `backup:${monthKey}`,
+    kind: 'backup_reminder',
+    title: 'Back up your data',
+    body: last == null
+      ? 'You haven’t made an encrypted backup yet. Tap to protect your data.'
+      : `Your last backup was over ${reminderDays} days ago. Make a fresh encrypted backup.`,
+    payload: { last_backup_at: settings?.last_backup_at || null, month_key: monthKey },
+    schedule: { type: 'now' },
+  }];
+}
+
 // 7.7 — Pantry low-stock checker.
 //
 // Fires once per (item, ISO week) when a live pantry row's current_qty is at

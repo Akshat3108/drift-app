@@ -46,6 +46,20 @@ const INCOME_HEADER = [
   'id', 'date', 'source', 'amount', 'recurring', 'notes',
 ];
 
+// PS-31 — investments sheet. Point-in-time holdings (not date-ranged), with the
+// derived cost-basis / market-value / gain columns the app already computes.
+const HOLDINGS_HEADER = [
+  'id', 'kind', 'label', 'units', 'unit_cost', 'current_nav',
+  'cost_basis', 'market_value', 'gain', 'last_updated', 'account_id', 'notes',
+];
+
+function holdingCols(h) {
+  const units = Number(h.units) || 0;
+  const cost = h.cost_basis != null ? Number(h.cost_basis) : units * (Number(h.unit_cost) || 0);
+  const market = h.current_value != null ? Number(h.current_value) : units * (Number(h.current_nav) || 0);
+  return { cost, market, gain: market - cost };
+}
+
 export function expensesToCSV(rows) {
   const lines = [csvRow(EXPENSES_HEADER)];
   for (const e of rows || []) {
@@ -112,10 +126,24 @@ export function incomeToCSV(rows) {
   return lines.join('\n');
 }
 
+export function holdingsToCSV(rows) {
+  const lines = [csvRow(HOLDINGS_HEADER)];
+  for (const h of rows || []) {
+    const { cost, market, gain } = holdingCols(h);
+    lines.push(csvRow([
+      h.id, h.kind, h.label,
+      h.units ?? '', h.unit_cost ?? '', h.current_nav ?? '',
+      cost.toFixed(2), market.toFixed(2), gain.toFixed(2),
+      h.last_updated || '', h.account_id ?? '', h.notes || '',
+    ]));
+  }
+  return lines.join('\n');
+}
+
 // One concatenated text file with section dividers. Excel opens it as a
 // single sheet with the dividers visible as malformed rows; humans can split
-// on `# section:` to recover three CSVs. Keeps the share UX to a single file.
-export function bundleToCSV({ expenses, items, income, meta }) {
+// on `# section:` to recover the CSVs. Keeps the share UX to a single file.
+export function bundleToCSV({ expenses, items, income, holdings, meta }) {
   const parts = [];
   parts.push(`# Drift export · generated ${meta?.generatedAt || ''}`);
   if (meta?.rangeLabel) parts.push(`# Range: ${meta.rangeLabel}`);
@@ -135,13 +163,18 @@ export function bundleToCSV({ expenses, items, income, meta }) {
     parts.push(`# section: income (${income.length})`);
     parts.push(incomeToCSV(income));
   }
+  if (holdings) {
+    parts.push('');
+    parts.push(`# section: investments (${holdings.length})`);
+    parts.push(holdingsToCSV(holdings));
+  }
   return parts.join('\n');
 }
 
 // One combined JSON object. Sections omitted entirely (not empty arrays) when
 // the caller didn't include them; clear distinction between "no rows" and
 // "didn't ask for this entity".
-export function bundleToJSON({ expenses, items, income, meta }) {
+export function bundleToJSON({ expenses, items, income, holdings, meta }) {
   const out = {
     meta: {
       app: 'Drift',
@@ -154,6 +187,7 @@ export function bundleToJSON({ expenses, items, income, meta }) {
   if (expenses) out.expenses = expenses;
   if (items)    out.items    = items;
   if (income)   out.income   = income;
+  if (holdings) out.investments = holdings;
   return JSON.stringify(out, null, 2);
 }
 
@@ -260,12 +294,13 @@ export function fyTaxSummary({ expenses, fyData, sym = '₹' }) {
 // Statement-style PDF template. Inline CSS only (expo-print HTML mode doesn't
 // run external requests). The @page rules give a roughly A4 layout with a
 // repeated table header on page breaks. No images.
-export function bundleToHTML({ expenses, items, income, meta, sym = '₹' }) {
+export function bundleToHTML({ expenses, items, income, holdings, meta, sym = '₹' }) {
   const generatedAt = meta?.generatedAt || new Date().toISOString();
   const range = meta?.rangeLabel || 'All time';
   const expRows = expenses || [];
   const itemRows = items || [];
   const incRows = income || [];
+  const holdRows = holdings || [];
   const totalExp = expRows.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const totalInc = incRows.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const net = totalInc - totalExp;
@@ -343,6 +378,40 @@ export function bundleToHTML({ expenses, items, income, meta, sym = '₹' }) {
     </table>
   ` : '';
 
+  // PS-31 — investments sheet.
+  const holdTotals = holdRows.reduce((a, h) => {
+    const { cost, market } = holdingCols(h);
+    a.cost += cost; a.market += market; return a;
+  }, { cost: 0, market: 0 });
+  const holdingsTable = holdRows.length ? `
+    <h2>Investments <span class="muted">(${holdRows.length} · ${fmtAmount(holdTotals.market, sym)})</span></h2>
+    <table class="ledger compact">
+      <thead><tr>
+        <th>Holding</th><th>Kind</th><th class="amt">Cost</th>
+        <th class="amt">Value</th><th class="amt">Gain</th>
+      </tr></thead>
+      <tbody>
+        ${holdRows.map(h => {
+          const { cost, market, gain } = holdingCols(h);
+          return `
+          <tr>
+            <td>${escapeHTML(h.label)}</td>
+            <td>${escapeHTML(h.kind)}</td>
+            <td class="amt">${fmtAmount(cost, sym)}</td>
+            <td class="amt">${fmtAmount(market, sym)}</td>
+            <td class="amt">${fmtAmount(gain, sym)}</td>
+          </tr>`;
+        }).join('')}
+        <tr>
+          <td><b>Total</b></td><td></td>
+          <td class="amt"><b>${fmtAmount(holdTotals.cost, sym)}</b></td>
+          <td class="amt"><b>${fmtAmount(holdTotals.market, sym)}</b></td>
+          <td class="amt"><b>${fmtAmount(holdTotals.market - holdTotals.cost, sym)}</b></td>
+        </tr>
+      </tbody>
+    </table>
+  ` : '';
+
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
 <title>Drift Export</title>
@@ -413,6 +482,7 @@ export function bundleToHTML({ expenses, items, income, meta, sym = '₹' }) {
   ${expRows.length ? `<h2>Spends</h2>${expenseTables}` : ''}
   ${incomeTable}
   ${itemsTable}
+  ${holdingsTable}
 
   <footer>Drift · 100% offline · exported ${escapeHTML(generatedAt)}</footer>
 </body></html>`;
@@ -497,7 +567,7 @@ function itrSectionsHTML({ expenses, fyData, sym }) {
 
 // `drift-export-2025-06-to-2026-05.csv` — predictable, sortable, no spaces.
 export function humanFilename({ format, rangeLabel, generatedAt }) {
-  const ext = format === 'pdf' ? 'pdf' : format === 'json' ? 'json' : 'csv';
+  const ext = format === 'pdf' ? 'pdf' : format === 'json' ? 'json' : format === 'ics' ? 'ics' : 'csv';
   const ts = (generatedAt || new Date().toISOString())
     .replace(/[:T]/g, '-')
     .replace(/\..+$/, '')
@@ -510,7 +580,79 @@ export const MIME_TYPES = {
   csv:  'text/csv',
   json: 'application/json',
   pdf:  'application/pdf',
+  ics:  'text/calendar',
 };
+
+// PS-48 — Single-receipt PDF (reimbursement flow). One expense + its items +
+// GST breakdown + the embedded receipt image on a single page. `receiptDataUri`
+// is a `data:image/...;base64,...` string built by the caller (Detail screen)
+// from the receipt file; null when there's no receipt. Pure — generated
+// locally, nothing leaves the device.
+export function singleReceiptHTML({ expense, items = [], receiptDataUri = null, sym = '₹' }) {
+  const e = expense || {};
+  const itemRows = (items || []).filter((it) => !it.deleted_at);
+  const hasGst = e.gstin || e.invoice_number ||
+    Number(e.cgst) || Number(e.sgst) || Number(e.igst);
+
+  const itemsTable = itemRows.length ? `
+    <h2>Items</h2>
+    <table class="tbl">
+      <thead><tr><th>Item</th><th class="q">Qty</th><th class="a">Unit</th><th class="a">Amount</th></tr></thead>
+      <tbody>
+        ${itemRows.map((it) => `
+          <tr>
+            <td>${escapeHTML(it.name)}${it.hsn ? `<div class="muted">HSN ${escapeHTML(it.hsn)}</div>` : ''}</td>
+            <td class="q">${escapeHTML(it.qty != null ? `${it.qty} ${it.unit || ''}`.trim() : '')}</td>
+            <td class="a">${fmtAmount(it.unit_price, sym)}</td>
+            <td class="a">${fmtAmount(it.price, sym)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+
+  const gstBlock = hasGst ? `
+    <h2>Tax / GST</h2>
+    <table class="tbl">
+      <tbody>
+        ${e.gstin ? `<tr><td>GSTIN</td><td class="a">${escapeHTML(e.gstin)}</td></tr>` : ''}
+        ${e.invoice_number ? `<tr><td>Invoice no.</td><td class="a">${escapeHTML(e.invoice_number)}</td></tr>` : ''}
+        ${Number(e.cgst) ? `<tr><td>CGST</td><td class="a">${fmtAmount(e.cgst, sym)}</td></tr>` : ''}
+        ${Number(e.sgst) ? `<tr><td>SGST</td><td class="a">${fmtAmount(e.sgst, sym)}</td></tr>` : ''}
+        ${Number(e.igst) ? `<tr><td>IGST</td><td class="a">${fmtAmount(e.igst, sym)}</td></tr>` : ''}
+      </tbody>
+    </table>` : '';
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 16mm; }
+    body { font-family: -apple-system, system-ui, sans-serif; color: #1f1d1a; font-size: 11pt; }
+    h1 { font-size: 20pt; margin: 0 0 2pt; font-weight: 500; }
+    h2 { font-size: 12pt; margin: 16pt 0 6pt; border-bottom: 1pt solid #e9e3d8; padding-bottom: 3pt; }
+    .muted { color: #97897a; font-size: 9pt; }
+    .hero { background: #f6efe2; border-radius: 8pt; padding: 14pt; margin: 12pt 0; }
+    .hero .amt { font-size: 26pt; font-weight: 500; }
+    .meta { color: #6e6358; font-size: 10pt; margin-top: 2pt; }
+    table.tbl { width: 100%; border-collapse: collapse; font-size: 10pt; }
+    table.tbl th { text-align: left; padding: 4pt 6pt; border-bottom: 1pt solid #d8cfbf;
+      font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #6e6358; }
+    table.tbl td { padding: 4pt 6pt; border-bottom: 1pt dotted #ece4d3; vertical-align: top; }
+    table.tbl td.a, table.tbl th.a { text-align: right; font-variant-numeric: tabular-nums; }
+    table.tbl td.q, table.tbl th.q { text-align: right; width: 16%; }
+    .receipt { margin-top: 14pt; }
+    .receipt img { max-width: 100%; max-height: 360pt; border: 1pt solid #e9e3d8; border-radius: 4pt; }
+    footer { margin-top: 18pt; padding-top: 8pt; border-top: 1pt solid #e9e3d8;
+      text-align: center; font-size: 8.5pt; color: #97897a; }
+  </style></head><body>
+    <h1>${escapeHTML(e.merchant || 'Receipt')}</h1>
+    <div class="meta">${escapeHTML(e.expense_date || '')}${e.category_name ? ` · ${escapeHTML(e.category_name)}` : ''}${e.payment_method ? ` · ${escapeHTML(e.payment_method)}` : ''}</div>
+    <div class="hero">
+      <div class="amt">${fmtAmount(e.amount, sym)}</div>
+      ${e.notes ? `<div class="meta">${escapeHTML(e.notes)}</div>` : ''}
+    </div>
+    ${itemsTable}
+    ${gstBlock}
+    ${receiptDataUri ? `<div class="receipt"><h2>Receipt</h2><img src="${receiptDataUri}"/></div>` : ''}
+    <footer>Generated by Drift · ${escapeHTML(new Date().toISOString().slice(0, 10))} · 100% offline</footer>
+  </body></html>`;
+}
 
 // PS-24 — Single-page Year-in-Review PDF template. Takes the rollup directly
 // (no expense ledger; this is a curated summary, not a statement).

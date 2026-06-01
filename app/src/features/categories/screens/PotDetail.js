@@ -80,6 +80,28 @@ function PotDetail({ route, navigation }) {
     return Array.from(byDay.values());
   }, [potExpenses]);
 
+  // PS-36 — sub-pot rollup is pure JS over the in-memory pots array (every
+  // category's leaf spend is already loaded). monthly_summary stays leaf-keyed;
+  // we never double-count because each pot row carries only its OWN spend.
+  const children = useMemo(
+    () => (pots || []).filter((p) => p.parent_id === potId),
+    [pots, potId],
+  );
+  const parentPot = useMemo(
+    () => (pot?.parent_id != null ? (pots || []).find((p) => p.id === pot.parent_id) : null),
+    [pots, pot?.parent_id],
+  );
+  const rollup = useMemo(() => {
+    if (!pot || children.length === 0) return null;
+    const childSpend  = children.reduce((s, c) => s + (c.spend || 0), 0);
+    const childBudget = children.reduce((s, c) => s + (c.budget || 0), 0);
+    return {
+      combinedSpend:  (pot.spend || 0) + childSpend,
+      combinedBudget: (pot.budget || 0) + childBudget,
+    };
+  }, [pot, children]);
+  const [childrenOpen, setChildrenOpen] = useState(true);
+
   const onRowPress = useCallback((id) => {
     navigation.navigate('Detail', { id });
   }, [navigation]);
@@ -139,6 +161,22 @@ function PotDetail({ route, navigation }) {
               <Text style={{ fontSize: 12, color: F.ink, fontWeight: '600' }}>Edit</Text>
             </TouchableOpacity>
           </View>
+
+          {parentPot && (
+            <TouchableOpacity
+              onPress={() => navigation.push('PotDetail', { potId: parentPot.id })}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Part of ${parentPot.label}`}
+              style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4,
+                backgroundColor: F.surface, paddingHorizontal: 10, paddingVertical: 4,
+                borderRadius: 99, marginBottom: 10 }}>
+              <Text style={{ fontSize: 12 }}>{parentPot.emoji}</Text>
+              <Text style={{ fontSize: 11, color: F.ink2, fontWeight: '600' }}>
+                Part of {parentPot.label}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <Text style={{ fontSize: 13, color: F.ink2 }}>Spent this month</Text>
           <Text style={{ fontSize: 48, color: F.ink, fontWeight: '400', lineHeight: 54, marginTop: 2 }}>
@@ -202,12 +240,45 @@ function PotDetail({ route, navigation }) {
           </View>
         )}
 
+        {/* PS-36 — sub-pot rollup. Collapsible list of child pots + combined
+            spend/budget. Tap a child to drill into its own detail. */}
+        {rollup && (
+          <View style={{ backgroundColor: F.surface, borderRadius: 18, borderWidth: 1,
+            borderColor: F.line, padding: 16, marginTop: 12 }}>
+            <TouchableOpacity onPress={() => setChildrenOpen((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: childrenOpen }}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: 13, color: F.ink2, fontWeight: '600' }}>
+                Includes {children.length} sub-pot{children.length === 1 ? '' : 's'}
+              </Text>
+              <Text style={{ fontSize: 13, color: F.ink3 }}>{childrenOpen ? '▾' : '▸'}</Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 12, color: F.ink3, marginTop: 4 }}>
+              Combined {sym}{rollup.combinedSpend.toFixed(2)}
+              {rollup.combinedBudget > 0 ? ` of ${sym}${rollup.combinedBudget.toFixed(2)}` : ''}
+            </Text>
+            {childrenOpen && children.map((c, i) => (
+              <TouchableOpacity key={c.id}
+                onPress={() => navigation.push('PotDetail', { potId: c.id })}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
+                  paddingVertical: 10, borderTopWidth: 1, borderTopColor: F.line,
+                  marginTop: i === 0 ? 12 : 0 }}>
+                <Text style={{ fontSize: 18 }}>{c.emoji}</Text>
+                <Text style={{ flex: 1, fontSize: 14, color: F.ink }}>{c.label}</Text>
+                <Text style={{ fontSize: 13, color: F.ink2 }}>{sym}{(c.spend || 0).toFixed(2)}</Text>
+                <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <Text style={{ fontSize: 18, color: F.ink, marginTop: 20 }}>
           Transactions{potExpenses.length > 0 ? ` (${potExpenses.length})` : ''}
         </Text>
       </>
     );
-  }, [pot, F, sym, navigation, potExpenses.length, forecast]);
+  }, [pot, F, sym, navigation, potExpenses.length, forecast, rollup, children, childrenOpen, parentPot]);
 
   const ListEmpty = useMemo(() => {
     if (!pot) return null;

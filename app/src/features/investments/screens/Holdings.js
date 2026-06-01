@@ -2,7 +2,7 @@
 //
 // Hero card: portfolio market value + cost basis + unrealised gain/loss.
 // Per-holding rows: kind chip, label, units × NAV computed value + gain pct.
-// Tap row → EditHolding; long-press → soft-delete with Undo.
+// Tap row → HoldingDetail (NAV trajectory + returns); long-press → soft-delete with Undo.
 // FAB → EditHolding (create flow).
 
 import React, { useMemo, useCallback } from 'react';
@@ -111,10 +111,10 @@ function Holdings({ navigation }) {
           <TouchableOpacity
             key={h.id}
             onLongPress={() => handleLongPress(h)}
-            onPress={() => navigation.navigate('EditHolding', { id: h.id })}
+            onPress={() => navigation.navigate('HoldingDetail', { id: h.id })}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={`Edit holding ${h.label}`}
+            accessibilityLabel={`View holding ${h.label}`}
             style={{ backgroundColor: F.surface, borderRadius: 18,
               padding: 14, marginBottom: 10, flexDirection: 'row',
               alignItems: 'center', gap: 12,

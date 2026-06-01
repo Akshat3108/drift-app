@@ -41,6 +41,7 @@ import ReviewQueueScreen from '@features/scan/screens/ReviewQueue';
 import CashflowCalendarScreen from '@features/analytics/screens/CashflowCalendar';
 import PendingScreen from '@features/expenses/screens/Pending';
 import TrendsScreen      from '@features/trends/screens/Trends';
+import CompareMonthsScreen from '@features/trends/screens/CompareMonths';
 import SubsScreen        from '@features/subs/screens/Subs';
 import AddScreen         from '@features/expenses/screens/Add';
 import DetailScreen      from '@features/expenses/screens/Detail';
@@ -69,6 +70,8 @@ import EditPotScreen     from '@features/categories/screens/EditPot';
 import EditSubScreen     from '@features/subs/screens/EditSub';
 import SubCalendarScreen from '@features/subs/screens/SubCalendar';
 import ManageTagsScreen  from '@features/tags/screens/ManageTags';
+import TagAnalyticsScreen from '@features/tags/screens/TagAnalytics';
+import TagRulesScreen     from '@features/tags/screens/TagRules';
 import EMIScreen         from '@features/emi/screens/EMI';
 import EditEMIScreen     from '@features/emi/screens/EditEMI';
 import TaxBenefitScreen  from '@features/emi/screens/TaxBenefit';
@@ -91,6 +94,7 @@ import CsvImportScreen        from '@features/csv_import/screens/CsvImport';
 import CsvReviewScreen        from '@features/csv_import/screens/CsvReview';
 import HoldingsScreen         from '@features/investments/screens/Holdings';
 import EditHoldingScreen      from '@features/investments/screens/EditHolding';
+import HoldingDetailScreen    from '@features/investments/screens/HoldingDetail';
 import InsuranceScreen        from '@features/insurance/screens/Insurance';
 import EditInsuranceScreen    from '@features/insurance/screens/EditInsurance';
 import FASTagScreen           from '@features/fastag/screens/FASTag';
@@ -121,6 +125,7 @@ const ReviewQueue = withBoundary('ReviewQueue', ReviewQueueScreen);
 const CashflowCalendar = withBoundary('CashflowCalendar', CashflowCalendarScreen);
 const Pending = withBoundary('Pending', PendingScreen);
 const Trends      = withBoundary('Trends',      TrendsScreen);
+const CompareMonths = withBoundary('CompareMonths', CompareMonthsScreen);
 const Subs        = withBoundary('Subs',        SubsScreen);
 const Add         = withBoundary('Add',         AddScreen);
 const Detail      = withBoundary('Detail',      DetailScreen);
@@ -149,6 +154,8 @@ const EditPot     = withBoundary('EditPot',     EditPotScreen);
 const EditSub     = withBoundary('EditSub',     EditSubScreen);
 const SubCalendar = withBoundary('SubCalendar', SubCalendarScreen);
 const ManageTags  = withBoundary('ManageTags',  ManageTagsScreen);
+const TagAnalytics = withBoundary('TagAnalytics', TagAnalyticsScreen);
+const TagRules     = withBoundary('TagRules',     TagRulesScreen);
 const EMI         = withBoundary('EMI',         EMIScreen);
 const EditEMI     = withBoundary('EditEMI',     EditEMIScreen);
 const TaxBenefit  = withBoundary('TaxBenefit',  TaxBenefitScreen);
@@ -171,6 +178,7 @@ const CsvImport        = withBoundary('CsvImport',        CsvImportScreen);
 const CsvReview        = withBoundary('CsvReview',        CsvReviewScreen);
 const Holdings         = withBoundary('Holdings',         HoldingsScreen);
 const EditHolding      = withBoundary('EditHolding',      EditHoldingScreen);
+const HoldingDetail    = withBoundary('HoldingDetail',    HoldingDetailScreen);
 const Insurance        = withBoundary('Insurance',        InsuranceScreen);
 const EditInsurance    = withBoundary('EditInsurance',    EditInsuranceScreen);
 const FASTag           = withBoundary('FASTag',           FASTagScreen);
@@ -273,6 +281,7 @@ export default function Navigation() {
             Home or the Analytics Hub's Reports rows, even though neither
             is a tab anymore. */}
         <Stack.Screen name="Trends"      component={Trends}      options={{ title: 'Trends' }}/>
+        <Stack.Screen name="CompareMonths" component={CompareMonths} options={{ title: 'Compare months' }}/>
         <Stack.Screen name="Subs"        component={Subs}        options={{ title: 'Subscriptions' }}/>
 
         {/* Phase 3 UI batch new screens */}
@@ -308,6 +317,10 @@ export default function Navigation() {
         {/* 7.3 — Manage tags: rename + merge + soft-delete. */}
         <Stack.Screen name="ManageTags"         component={ManageTags}
           options={{ title: 'Manage tags' }}/>
+        <Stack.Screen name="TagAnalytics"       component={TagAnalytics}
+          options={{ title: 'Top tags' }}/>
+        <Stack.Screen name="TagRules"           component={TagRules}
+          options={{ title: 'Auto-tag rules' }}/>
 
         {/* 7.4 — Spending calendar: per-day month grid with tap-day callout.
             Distinct from `Calendar` (6.18 heatmaps) and `SubCalendar` (7.2). */}
@@ -374,6 +387,8 @@ export default function Navigation() {
           options={{ title: 'Investments' }}/>
         <Stack.Screen name="EditHolding"        component={EditHolding}
           options={({ route }) => ({ title: route?.params?.id ? 'Edit holding' : 'Add holding' })}/>
+        <Stack.Screen name="HoldingDetail"      component={HoldingDetail}
+          options={{ title: 'Holding' }}/>
 
         {/* PS-11 — Insurance policy tracker. */}
         <Stack.Screen name="Insurance"          component={Insurance}

@@ -496,7 +496,7 @@ export const expenses = {
     // pot row. NULL when no carryover row exists for the (category, month).
     return all(
       `SELECT c.id, c.name, c.emoji, c.color, c.budget, c.sort_order,
-              c.rollover_enabled,
+              c.rollover_enabled, c.parent_id,
               COALESCE(ms.total, 0) AS spent,
               COALESCE(br.rollover_in, 0) AS rollover_in
        FROM categories c

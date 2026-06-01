@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../../hooks/useAppState';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
+import { wouldCycle } from '../repo';
 
 const EMOJIS = ['🍴','🥬','🚲','🎬','💊','🧾','📺','🛒','🏠','🚗','💼','🎓','🧘','🌿','📚','🎁','✈️'];
 const COLORS = [
@@ -76,19 +77,32 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
   // forward as a credit, over-spend as a debit. Computed lazily by
   // rolloverRepo.ensureRolloverForMonth before each pots() read.
   const [rolloverEnabled, setRolloverEnabled] = useState(editing ? !!editing.rollover_enabled : false);
+  // PS-36 — optional parent pot. null = top-level (the default / existing
+  // behaviour). Candidates exclude self and any descendant of self, so the
+  // picker can never offer a choice that would loop the tree.
+  const [parentId, setParentId] = useState(editing?.parent_id ?? null);
+  const parentChoices = (categories || []).filter(
+    (c) => c.id !== editing?.id && !wouldCycle(categories || [], editing?.id, c.id)
+  );
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Name required');
+    // Defensive: the picker already filters cycles, but re-check before write.
+    if (editing && parentId != null && wouldCycle(categories || [], editing.id, parentId)) {
+      return Alert.alert('Invalid parent', 'That choice would create a loop of categories.');
+    }
     const bud = parseFloat(budget) || 0;
     if (editing) {
       await updateCategory(editing.id, {
         name: name.trim(), emoji, budget: bud, color,
         rollover_enabled: rolloverEnabled ? 1 : 0,
+        parent_id: parentId,
       });
     } else {
       await addCategory({
         name: name.trim(), emoji, budget: bud, color,
         rollover_enabled: rolloverEnabled ? 1 : 0,
+        parent_id: parentId,
       });
     }
     navigation.goBack();
@@ -168,6 +182,44 @@ function EditOne({ id, F, sym, categories, addCategory, updateCategory, removeCa
           );
         })}
       </View>
+
+      {parentChoices.length > 0 && (
+        <>
+          <Text style={{ fontSize: 11, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 8 }}>
+            PARENT CATEGORY
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            <TouchableOpacity onPress={() => setParentId(null)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: parentId == null }}
+              style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
+                backgroundColor: parentId == null ? F.coral : F.surface,
+                borderWidth: 1, borderColor: parentId == null ? F.coral : F.line }}>
+              <Text style={{ color: parentId == null ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>
+                None (top-level)
+              </Text>
+            </TouchableOpacity>
+            {parentChoices.map((c) => {
+              const sel = parentId === c.id;
+              return (
+                <TouchableOpacity key={c.id} onPress={() => setParentId(c.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: sel }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
+                    backgroundColor: sel ? F.coral : F.surface,
+                    borderWidth: 1, borderColor: sel ? F.coral : F.line,
+                    flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 14 }}>{c.emoji}</Text>
+                  <Text style={{ color: sel ? '#fff' : F.ink2, fontSize: 12, fontWeight: '600' }}>{c.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={{ fontSize: 11, color: F.ink3, marginBottom: 22 }}>
+            Sub-pots keep their own budget; the parent's detail view rolls their spend up.
+          </Text>
+        </>
+      )}
 
       <Text style={{ fontSize: 11, color: F.ink3, fontWeight: '700', letterSpacing: 1, marginBottom: 8 }}>
         ROLLOVER

@@ -6,6 +6,7 @@ import { useItemActions } from '@features/items/context';
 import { PAYMENT_LABELS } from '@features/expenses/filters';
 import ReceiptViewer from '@features/expenses/components/ReceiptViewer';
 import { pickReceiptUri, hasReceipt as rowHasReceipt } from '@features/expenses/receiptUri';
+import { singleReceiptHTML, MIME_TYPES } from '@features/expenses/export';
 import SwipeableRow from '@components/SwipeableRow';
 import { useToast } from '@components/Toast';
 import { logError } from '@core/utils/log';
@@ -69,6 +70,8 @@ function Detail({ route, navigation }) {
   // when this row is itself a refund, the original it credits (→ back-link).
   const [refunds, setRefunds] = useState([]);
   const [refundOrigin, setRefundOrigin] = useState(null);
+  // PS-48 — single-receipt PDF export busy flag.
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // 5.13 — receipt viewer modal + 5.15 — shadow the row's receipt fields so a
   // successful lazy-migrate refreshes the thumb without a full provider hop.
@@ -148,6 +151,46 @@ function Detail({ route, navigation }) {
     } catch (err) {
       logError('detail:delete', err);
       Alert.alert('Delete failed', err?.message || String(err));
+    }
+  };
+
+  // PS-48 — export this single expense (+ items, GST, receipt image) as a
+  // one-page PDF for reimbursement. Generated + shared locally via expo-print /
+  // expo-sharing; nothing leaves the device. Native modules lazy-required so
+  // Metro doesn't choke before an Android rebuild.
+  const handleExportPdf = async () => {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      let receiptDataUri = null;
+      if (receiptUris.full) {
+        try {
+          const FS = require('expo-file-system/legacy');
+          const b64 = await FS.readAsStringAsync(receiptUris.full, {
+            encoding: FS.EncodingType?.Base64 ?? 'base64',
+          });
+          const mime = /\.png$/i.test(receiptUris.full) ? 'image/png' : 'image/jpeg';
+          receiptDataUri = `data:${mime};base64,${b64}`;
+        } catch (imgErr) {
+          logError('detail:pdf:receipt-read', imgErr); // proceed without the image
+        }
+      }
+      const html = singleReceiptHTML({ expense: e, items, receiptDataUri, sym });
+      let Print, Sharing;
+      try { Print = require('expo-print'); }
+      catch { Alert.alert('PDF unavailable', 'Install `expo-print` and rebuild Android to enable PDF export.'); return; }
+      const { uri } = await Print.printToFileAsync({ html });
+      try { Sharing = require('expo-sharing'); } catch { Sharing = null; }
+      if (Sharing && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: MIME_TYPES.pdf, dialogTitle: `${e.merchant} receipt` });
+      } else {
+        Alert.alert('PDF saved', `Saved at:\n${uri}`);
+      }
+    } catch (err) {
+      logError('detail:pdf', err);
+      Alert.alert('Could not export PDF', err?.message || String(err));
+    } finally {
+      setExportingPdf(false);
     }
   };
 
@@ -432,6 +475,18 @@ function Detail({ route, navigation }) {
           <Text style={{ color: F.sageD, fontWeight: '600' }}>↩ Mark as refunded</Text>
         </TouchableOpacity>
       )}
+
+      {/* PS-48 — one-page PDF for reimbursement (expense + items + GST + receipt). */}
+      <TouchableOpacity
+        onPress={handleExportPdf}
+        disabled={exportingPdf}
+        accessibilityRole="button" accessibilityLabel="Export this expense as PDF"
+        style={{ padding: 14, borderRadius: 12, marginBottom: 10, opacity: exportingPdf ? 0.6 : 1,
+          backgroundColor: F.surface, borderWidth: 1, borderColor: F.line, alignItems: 'center' }}>
+        <Text style={{ color: F.ink, fontWeight: '600' }}>
+          {exportingPdf ? 'Preparing PDF…' : '📄 Export as PDF'}
+        </Text>
+      </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <TouchableOpacity

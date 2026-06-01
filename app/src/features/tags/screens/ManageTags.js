@@ -75,7 +75,7 @@ function TagRow({ tag, F, onRename, onDelete }) {
   );
 }
 
-function ManageTags() {
+function ManageTags({ navigation }) {
   const { F } = useTheme();
   const { tags, renameTag, removeTag, restoreTag, refresh } = useTags();
   const toast = useToast();
@@ -155,6 +155,19 @@ function ManageTags() {
           Rename to merge two tags into one. Delete to unlink without losing expenses.
         </Text>
       </View>
+
+      {/* PS-35 — entry to the auto-tag rules CRUD. */}
+      <TouchableOpacity onPress={() => navigation?.navigate('TagRules')} activeOpacity={0.8}
+        accessibilityRole="button" accessibilityLabel="Auto-tag rules"
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: F.surface,
+          borderRadius: 14, borderWidth: 1, borderColor: F.line, padding: 14, marginBottom: 16 }}>
+        <Text style={{ fontSize: 20 }}>⚡</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, color: F.ink, fontWeight: '600' }}>Auto-tag rules</Text>
+          <Text style={{ fontSize: 11, color: F.ink3 }}>Tag matching expenses automatically on save</Text>
+        </View>
+        <Text style={{ fontSize: 16, color: F.ink3 }}>›</Text>
+      </TouchableOpacity>
 
       {tags.length === 0 ? (
         <View style={{ alignItems: 'center', padding: 32, backgroundColor: F.surface,

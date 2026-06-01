@@ -145,6 +145,63 @@ export async function createBackup({ passphrase }) {
   return { path, bytes: encrypted.length, fileCount: 1 + receipts.length };
 }
 
+// ── previewRestore ────────────────────────────────────────────────────
+//
+// PS-42 — dry-run before the destructive atomic swap. Decrypts + unzips IN
+// MEMORY (so a wrong passphrase / corrupt file fails harmlessly), writes the
+// backup's drift.db to a throwaway SQLite file, opens it read-only, and counts
+// the key tables. Returns { backup, current } so the UI can show the user what
+// a restore would REPLACE before they commit. Touches no live path.
+export async function previewRestore({ uri, passphrase }) {
+  if (!uri) throw new Error('uri required');
+  if (!passphrase) throw new Error('passphrase required');
+  const FS = fs();
+
+  const encrypted = await readBytes(FS, uri);
+  const zipBytes  = await decryptZip(encrypted, passphrase);   // throws BackupAuthError on wrong passphrase
+  let files;
+  try { files = unzipSync(zipBytes); }
+  catch (e) { throw new BackupFormatError(`zip corrupted: ${e.message}`); }
+  if (!files['drift.db']) throw new BackupFormatError('backup missing drift.db');
+
+  const SQLite = require('expo-sqlite');
+  const previewName = 'drift-restore-preview.db';
+  const previewPath = `${DB_DIR(FS)}${previewName}`;
+  await ensureDir(FS, DB_DIR(FS));
+  await deleteIfExists(FS, previewPath);
+  await deleteIfExists(FS, `${previewPath}-wal`);
+  await deleteIfExists(FS, `${previewPath}-shm`);
+  await writeBytes(FS, previewPath, files['drift.db']);
+
+  const countTables = async (db) => {
+    const n = async (sql) => { try { const r = await db.getFirstAsync(sql); return r?.n ?? 0; } catch { return 0; } };
+    return {
+      expenses: await n(`SELECT COUNT(*) AS n FROM expenses WHERE deleted_at IS NULL`),
+      income:   await n(`SELECT COUNT(*) AS n FROM income`),
+      items:    await n(`SELECT COUNT(*) AS n FROM receipt_items`),
+      schema:   await n(`SELECT MAX(version) AS n FROM schema_version`),
+    };
+  };
+
+  let backup;
+  const pdb = await SQLite.openDatabaseAsync(previewName);
+  try {
+    backup = await countTables(pdb);
+    backup.receipts = Object.keys(files).filter((k) => k.startsWith('receipts/')).length;
+  } finally {
+    try { await pdb.closeAsync(); } catch (e) { logError('preview:close', e); }
+    await deleteIfExists(FS, previewPath);
+    await deleteIfExists(FS, `${previewPath}-wal`);
+    await deleteIfExists(FS, `${previewPath}-shm`);
+  }
+
+  const live = await getDB();
+  const current = await countTables(live);
+  current.receipts = (await walkRelative(FS, RECEIPTS_DIR(FS))).length;
+
+  return { backup, current };
+}
+
 // ── restoreBackup ─────────────────────────────────────────────────────
 
 export async function restoreBackup({ uri, passphrase }) {

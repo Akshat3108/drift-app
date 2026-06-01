@@ -18,11 +18,18 @@ import { useSettings } from '@features/profile/settings.context';
 import { Toggle } from '@components/primitives/Toggle';
 import { expenses as expRepo } from '@features/expenses/repo';
 import { items as itemRepo } from '@features/items/repo';
+import { holdingsRepo } from '@features/investments/repo';
 import { income as incRepo } from '@features/income/repo';
 import { presetToDateRange } from '@features/expenses/filters';
 import {
   bundleToCSV, bundleToJSON, bundleToHTML, humanFilename, MIME_TYPES,
 } from '@features/expenses/export';
+import { buildICS } from '@features/expenses/icsExport';
+import { buildOutflowEvents } from '@features/analytics/screens/CashflowCalendar';
+import { subs as subsRepo } from '@features/subs/repo';
+import { emiRepo } from '@features/emi/repo';
+import { insuranceRepo } from '@features/insurance/repo';
+import { utilityAccountsRepo, utilityBillsRepo } from '@features/utilities/repo';
 import { logError } from '@core/utils/log';
 
 const PRESETS = [
@@ -107,6 +114,9 @@ export default function Export({ navigation, route }) {
   const [includeExpenses, setIncludeExpenses] = useState(true);
   const [includeItems, setIncludeItems]       = useState(true);
   const [includeIncome, setIncludeIncome]     = useState(!isBatchMode); // 5.8: ids never reach income
+  // PS-31 — investments are point-in-time holdings, not date-ranged. Off in
+  // batch mode (selected expense ids don't carry holdings), default ON otherwise.
+  const [includeInvestments, setIncludeInvestments] = useState(!isBatchMode);
 
   const [busy, setBusy]   = useState(null); // 'csv' | 'json' | 'pdf' | null
   const [counts, setCounts] = useState({ exp: null, item: null, inc: null });
@@ -166,8 +176,12 @@ export default function Export({ navigation, route }) {
     if (includeIncome && !isBatchMode) {
       out.income = await incRepo.listForExport({ criteria, limit: 5000 });
     }
+    // Holdings are not date-ranged — export the full live set when asked.
+    if (includeInvestments && !isBatchMode) {
+      out.holdings = await holdingsRepo.list();
+    }
     return out;
-  }, [criteria, includeExpenses, includeItems, includeIncome, isBatchMode]);
+  }, [criteria, includeExpenses, includeItems, includeIncome, includeInvestments, isBatchMode]);
 
   const share = useCallback(async (uri, mimeType, dialogTitle) => {
     let Sharing;
@@ -199,6 +213,40 @@ export default function Export({ navigation, route }) {
 
   const runExport = useCallback(async (format) => {
     if (busy) return;
+
+    // PS-40 — .ics is a standalone "bills calendar" export: it ignores the
+    // date-range + entity toggles and projects the next 12 months of recurring
+    // outflows (subs / EMI / insurance / utility) via the PS-27 projector.
+    if (format === 'ics') {
+      setBusy('ics');
+      try {
+        const [subList, loans, policies, utilAccounts, utilLast] = await Promise.all([
+          subsRepo.list().catch(() => []),
+          emiRepo.listLive().catch(() => []),
+          insuranceRepo.list().catch(() => []),
+          utilityAccountsRepo.listLive().catch(() => []),
+          utilityBillsRepo.aggregatesByAccount().catch(() => new Map()),
+        ]);
+        const events = buildOutflowEvents({
+          horizonDays: 365, subs: subList, loans, policies, utilAccounts, utilLast,
+        });
+        if (!events.length) {
+          Alert.alert('Nothing to export', 'No upcoming subscriptions, EMIs, insurance, or utility bills in the next 12 months.');
+          return;
+        }
+        const generatedAt = new Date().toISOString();
+        const text = buildICS(events, { sym });
+        const path = await writeText(text, humanFilename({ format: 'ics', rangeLabel: 'bills', generatedAt }));
+        await share(path, MIME_TYPES.ics, 'Share Drift bills calendar');
+      } catch (e) {
+        logError('export.ics', e);
+        Alert.alert('Calendar export failed', e?.message || String(e));
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+
     if (!includeExpenses && !includeItems && !(includeIncome && !isBatchMode)) {
       Alert.alert('Nothing selected', 'Toggle at least one entity to include in the export.');
       return;
@@ -224,7 +272,7 @@ export default function Export({ navigation, route }) {
 
     setBusy(format);
     try {
-      const { expenses, items, income } = await fetchAll();
+      const { expenses, items, income, holdings } = await fetchAll();
       const generatedAt = new Date().toISOString();
       const meta = { generatedAt, rangeLabel: range.label };
 
@@ -265,19 +313,19 @@ export default function Export({ navigation, route }) {
       }
 
       if (format === 'csv') {
-        const text = bundleToCSV({ expenses, items, income, meta });
+        const text = bundleToCSV({ expenses, items, income, holdings, meta });
         const path = await writeText(text, humanFilename({ format: 'csv', rangeLabel: range.label, generatedAt }));
         await share(path, MIME_TYPES.csv, 'Share Drift export');
         return;
       }
       if (format === 'json') {
-        const text = bundleToJSON({ expenses, items, income, meta });
+        const text = bundleToJSON({ expenses, items, income, holdings, meta });
         const path = await writeText(text, humanFilename({ format: 'json', rangeLabel: range.label, generatedAt }));
         await share(path, MIME_TYPES.json, 'Share Drift export');
         return;
       }
       if (format === 'pdf') {
-        const html = bundleToHTML({ expenses, items, income, meta, sym });
+        const html = bundleToHTML({ expenses, items, income, holdings, meta, sym });
         let Print;
         try {
           Print = require('expo-print');
@@ -295,7 +343,7 @@ export default function Export({ navigation, route }) {
     } finally {
       setBusy(null);
     }
-  }, [busy, includeExpenses, includeItems, includeIncome, isBatchMode, range, fetchAll, share, writeText, sym]);
+  }, [busy, includeExpenses, includeItems, includeIncome, includeInvestments, isBatchMode, range, fetchAll, share, writeText, sym]);
 
   const onCustomChange = (which, _event, date) => {
     setPickerOpen(null);
@@ -378,6 +426,10 @@ export default function Export({ navigation, route }) {
             <ToggleRow F={F} icon="💰" label="Income" sub={counts.inc == null ? '—' : `${counts.inc} row${counts.inc === 1 ? '' : 's'}`}
               value={includeIncome} onChange={setIncludeIncome}/>
           )}
+          {!isBatchMode && (
+            <ToggleRow F={F} icon="📈" label="Investments" sub="current holdings + returns"
+              value={includeInvestments} onChange={setIncludeInvestments}/>
+          )}
         </View>
 
         <Text style={{ fontSize: 11, fontWeight: '700', color: F.ink3, letterSpacing: 1,
@@ -389,6 +441,11 @@ export default function Export({ navigation, route }) {
             onPress={() => runExport('json')}/>
           <FormatButton F={F} label="PDF" sub="Statement" emoji="📑" busy={busy === 'pdf'} disabled={!!busy}
             onPress={() => runExport('pdf')}/>
+        </View>
+        {/* PS-40 — bills calendar (.ics). Standalone: ignores the toggles above. */}
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+          <FormatButton F={F} label="Calendar" sub="Bills .ics (12 mo)" emoji="🗓️"
+            busy={busy === 'ics'} disabled={!!busy} onPress={() => runExport('ics')}/>
         </View>
 
         <Text style={{ fontSize: 12, color: F.ink3, marginTop: 16, lineHeight: 18 }}>

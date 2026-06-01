@@ -30,9 +30,14 @@ export function InvestmentsProvider({ children }) {
   const removeHolding = useCallback(async (id)        => { await holdingsRepo.remove(id);  await refresh(); }, [refresh]);
   const restoreHolding= useCallback(async (id)        => { await holdingsRepo.restore(id); await refresh(); }, [refresh]);
 
+  // PS-31 — per-holding NAV time-series for the returns chart. Read-only and
+  // per-id (not provider state), so it's a thin repo passthrough.
+  const navHistory = useCallback((id) => holdingsRepo.navHistory(id), []);
+
   const value = {
     ready, holdings, totals,
     addHolding, updateHolding, updateNav, removeHolding, restoreHolding,
+    navHistory,
   };
   return <InvestmentsContext.Provider value={value}>{children}</InvestmentsContext.Provider>;
 }

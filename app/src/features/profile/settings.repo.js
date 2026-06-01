@@ -23,6 +23,10 @@ const DEFAULTS = {
   show_receipt_thumbnails: 0,
   // v52 — per-chart rendering preferences, JSON map { "<chartId>": "<type>" }.
   chart_prefs: '{}',
+  // v55 — Wave-5 settings batch
+  last_backup_at: null,        // PS-42 — ISO timestamp of last successful backup
+  backup_reminder_days: 30,    // PS-42 — 0 disables the staleness nudge
+  track_cash: 0,               // PS-45 — opt-in cash-on-hand reconciliation
 };
 
 export const settings = {
@@ -42,8 +46,9 @@ export const settings = {
                              capture_expense_time,
                              notif_budget_enabled, notif_sub_enabled, notif_price_enabled,
                              notif_lowstock_enabled, notif_health_enabled,
-                             accent_color, show_receipt_thumbnails, chart_prefs)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             accent_color, show_receipt_thumbnails, chart_prefs,
+                             last_backup_at, backup_reminder_days, track_cash)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          currency               = excluded.currency,
          dark_mode              = excluded.dark_mode,
@@ -64,7 +69,10 @@ export const settings = {
          notif_health_enabled    = excluded.notif_health_enabled,
          accent_color            = excluded.accent_color,
          show_receipt_thumbnails = excluded.show_receipt_thumbnails,
-         chart_prefs             = excluded.chart_prefs`,
+         chart_prefs             = excluded.chart_prefs,
+         last_backup_at          = excluded.last_backup_at,
+         backup_reminder_days    = excluded.backup_reminder_days,
+         track_cash              = excluded.track_cash`,
       [
         next.currency,
         next.dark_mode ? 1 : 0,
@@ -86,6 +94,9 @@ export const settings = {
         next.accent_color == null ? null : String(next.accent_color),
         next.show_receipt_thumbnails ? 1 : 0,
         typeof next.chart_prefs === 'string' ? next.chart_prefs : '{}',
+        next.last_backup_at == null ? null : String(next.last_backup_at),
+        Number.isInteger(next.backup_reminder_days) ? next.backup_reminder_days : 30,
+        next.track_cash ? 1 : 0,
       ]
     );
     return this.get();
